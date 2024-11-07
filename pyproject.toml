@@ -1,0 +1,49 @@
+[project]
+name = "ssbgm"
+version = "0.0.0a0"
+description = "Score Based Generative Model with scikit-learn"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "catboost>=1.2.7",
+    "lightgbm>=4.5.0",
+    "numpy>=1.26.4",
+    "scikit-learn>=1.5.2",
+    "tqdm>=4.67.0",
+    "types-tqdm>=4.66.0.20240417",
+]
+authors = [{ name = "hmasdev" }]
+maintainers = [{ name = "hmasdev" }]
+license = { file = "LICENSE" }
+
+[project.optional-dependencies]
+dev = [
+    "autopep8>=2.3.1",
+    "flake8>=7.1.1",
+    "mypy>=1.13.0",
+    "pytest>=8.3.3",
+    "pytest-cov>=6.0.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "autopep8>=2.3.1",
+    "flake8>=7.1.1",
+    "mypy>=1.13.0",
+    "pytest>=8.3.3",
+    "pytest-cov>=6.0.0",
+]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+testpaths = ["tests"]
+addopts = "--cov=ssbgm --cov-report=term-missing --cov-report=xml -m 'not integration'"
+markers = ["integration: mark a test as an integration test"]
+
+[tool.mypy]
+warn_return_any = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["sklearn", "sklearn.*"]
+ignore_missing_imports = true
