@@ -105,7 +105,7 @@ X_syn_em = sbmgenerator2.sample(X, n_samples=128, sampling_method=sbmgenerator2.
 
 #### Mixed Gaussian Distribution
 
-See [./examples/mixed_gaussian_distribution.ipynb](./examples/mixed_gaussian_distribution.ipynb) for more details.
+See [./samples/mixed_gaussian_distribution.ipynb](./samples/mixed_gaussian_distribution.ipynb) for more details.
 
 ```python
 # import libraries
