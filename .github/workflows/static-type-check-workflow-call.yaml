@@ -40,5 +40,5 @@ jobs:
 
       - name: Run mypy
         run: |
-          mypy ssbgs
+          mypy ssbgm
           mypy tests
