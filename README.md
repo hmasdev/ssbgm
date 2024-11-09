@@ -1,5 +1,12 @@
 # `ssbgm`: Scikit-learn-based Score Based Generative Model
 
+![GitHub top language](https://img.shields.io/github/languages/top/hmasdev/ssbgm)
+![GitHub tag (latest SemVer)](https://img.shields.io/github/v/tag/hmasdev/ssbgm?sort=semver)
+![GitHub](https://img.shields.io/github/license/hmasdev/ssbgm)
+![GitHub last commit](https://img.shields.io/github/last-commit/hmasdev/ssbgm)
+
+![Scheduled Test](https://github.com/hmasdev/ssbgm/actions/workflows/tests-on-schedule.yaml/badge.svg)
+
 `ssbgm` is a python library which enables you to generate synthetic data using a score based generative model with `scikit-learn`.
 
 You can use `ssbgm` to predict a target value with some features by generating synthetic data given the features.
