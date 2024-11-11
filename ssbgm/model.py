@@ -1,6 +1,6 @@
 from enum import Enum
 from functools import partial
-from typing import Iterable, Literal, TypeVar
+from typing import Callable, Iterable, Literal, TypeVar
 import numpy as np
 import sklearn
 from sklearn.base import (
@@ -83,9 +83,15 @@ class ScoreBasedGenerator(BaseEstimator):
         EULER: str = 'euler'
         EULER_MARUYAMA: str = 'euler_maruyama'
 
-    def __init__(self, estimator: BaseEstimator, random_state: int = 0):
+    def __init__(
+        self,
+        estimator: BaseEstimator,
+        random_state: int = 0,
+    ):
         self.estimator = estimator
         self.random_state = random_state
+
+        self._large_value: float = 1e12
 
     def fit(
         self: TScoreBasedGenerator,
@@ -185,6 +191,7 @@ class ScoreBasedGenerator(BaseEstimator):
         n_warmup: int = 100,
         alpha: float = 0.1,
         sigma: float | None = None,
+        is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,
     ) -> np.ndarray:
         """Generate samples from the Langevin Monte Carlo algorithm.
 
@@ -196,6 +203,8 @@ class ScoreBasedGenerator(BaseEstimator):
             n_warmup (int, optional): number of warmup steps before generating samples. Defaults to 100.
             alpha (float, optional): time step size of the Langevin Monte Carlo algorithm. Defaults to 0.1.
             sigma (float | None, optional): noise strength. Defaults to None.
+            is_in_valid_domain_func (Callable[[np.ndarray], bool] | None, optional): function to check whether the sample is in the valid domain. Defaults to None.
+                When is_in_valid_domain_func is given, _sample_langenvin_montecarlo draws samples with Metropolis-adjusted Langevin algorithm in stead of Langevin Monte Carlo algorithm.
 
         Returns:
             np.ndarray: samples from the Langevin Monte Carlo algorithm.
@@ -228,6 +237,15 @@ class ScoreBasedGenerator(BaseEstimator):
                     nabla_U=partial(dU, sigma=sigma),
                     n_steps=n_warmup + n_samples,
                     delta_t=alpha,
+                    pdf=(lambda x: self._large_value * is_in_valid_domain_func(x)) if is_in_valid_domain_func is not None else None,  # noqa
+                    # NOTE:
+                    # is_in_valid_domain_func is not a valid probability density function.  # noqa
+                    # But is_in_valid_domain_func is used for the purpose of filtering out invalid values  # noqa
+                    # FIXME:
+                    # self.large_value is multiplied to pdf to avoid unexpected rejection.  # noqa
+                    # MALA use the min(1, (pdf(z_k^l) q(x_{k-1}|z_k^l)) / (pdf(x_{k-1}) q(z_k^l|x_{k-1}))).  # noqa
+                    # So, there is a pair of (z_k^l, x_{k-1}) that both are in the valid domain but z_k^l is rejected.  # noqa
+                    # To avoid this, the large value is multiplied to pdf.
                 )[-1]
 
         # Output: (n_samples, N, n_outputs)
@@ -236,6 +254,15 @@ class ScoreBasedGenerator(BaseEstimator):
             nabla_U=partial(dU, sigma=sigma),
             n_steps=n_warmup + n_samples,
             delta_t=alpha,
+            pdf=(lambda x: self._large_value * is_in_valid_domain_func(x)) if is_in_valid_domain_func is not None else None,  # noqa
+            # NOTE:
+            # is_in_valid_domain_func is not a valid probability density function.  # noqa
+            # But is_in_valid_domain_func is used for the purpose of filtering out invalid values  # noqa
+            # FIXME:
+            # self.large_value is multiplied to pdf to avoid unexpected rejection.  # noqa
+            # MALA use the min(1, (pdf(z_k^l) q(x_{k-1}|z_k^l)) / (pdf(x_{k-1}) q(z_k^l|x_{k-1}))).  # noqa
+            # So, there is a pair of (z_k^l, x_{k-1}) that both are in the valid domain but z_k^l is rejected.  # noqa
+            # To avoid this, the large value is multiplied to pdf.
         ).reshape(n_samples+n_warmup, -1, self.n_outputs_)[n_warmup:]
 
     def _sample_euler(
@@ -345,6 +372,7 @@ class ScoreBasedGenerator(BaseEstimator):
         alpha: float = 0.1,  # only for langevin monte carlo
         sigma: float | None = None,  # only for langevin monte carlo
         init_sample: np.ndarray | None = None,  # only for langevin monte carlo
+        is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,  # only for langevin monte carlo # noqa
         n_steps: int = 1000,  # only for euler, euler-maruyama
         return_paths: bool = False,  # only for euler, euler-maruyama
         seed: int | None = None,
@@ -360,6 +388,8 @@ class ScoreBasedGenerator(BaseEstimator):
             alpha (float, optional): time step size of the Langevin Monte Carlo algorithm. Defaults to 0.1. (NOTE: only for langevin monte carlo)
             sigma (float | None, optional): noise strength. Defaults to None. (NOTE: only for langevin monte carlo)
             init_sample (np.ndarray | None, optional): initial sample. Defaults to None. (n_outputs,) shape array if it is not None.  (NOTE: only for langevin monte carlo)
+            is_in_valid_domain_func (Callable[[np.ndarray], bool] | None, optional): function to check whether the sample is in the valid domain. Defaults to None. (NOTE: only for langevin monte carlo)
+                When is_in_valid_domain_func is given, _sample_langenvin_montecarlo draws samples with Metropolis-adjusted Langevin algorithm in stead of Langevin Monte Carlo algorithm.
 
             n_steps (int, optional): number of steps. Defaults to 1000. (NOTE: only for euler, euler-maruyama)
             return_paths (bool, optional): flag to return paths. Defaults to False. (NOTE: only for euler, euler-maruyama)
@@ -377,7 +407,15 @@ class ScoreBasedGenerator(BaseEstimator):
 
         with np_seed(seed):
             if sampling_method == ScoreBasedGenerator.SamplingMethod.LANGEVIN_MONTECARLO:  # noqa
-                return self._sample_langenvin_montecarlo(X, n_samples=n_samples, n_warmup=n_warmup, alpha=alpha, sigma=sigma, init_sample=init_sample)  # noqa
+                return self._sample_langenvin_montecarlo(
+                    X,
+                    n_samples=n_samples,
+                    n_warmup=n_warmup,
+                    alpha=alpha,
+                    sigma=sigma,
+                    init_sample=init_sample,
+                    is_in_valid_domain_func=is_in_valid_domain_func,
+                )
             elif sampling_method == ScoreBasedGenerator.SamplingMethod.EULER:  # noqa
                 return self._sample_euler(X, n_samples=n_samples, n_steps=n_steps, return_paths=return_paths)  # noqa
             elif sampling_method == ScoreBasedGenerator.SamplingMethod.EULER_MARUYAMA:  # noqa
