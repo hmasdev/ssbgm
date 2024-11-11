@@ -11,6 +11,8 @@ def langevin_montecarlo(
     n_steps: int = 1000,
     pdf: Callable[[np.ndarray], float] | None = None,
     max_n_iter_until_accept: int = 100,
+    *,
+    verbose: bool = False,
 ) -> np.ndarray:
     """Generate samples from the Langevin Monte Carlo algorithm.
 
@@ -24,6 +26,7 @@ def langevin_montecarlo(
             See https://en.wikipedia.org/wiki/Metropolis-adjusted_Langevin_algorithm .
             Note that the shape of argument of pdf must be the same as x0.
         max_n_iter_until_accept (int, optional): maximum number of iterations until accept. Defaults to 100.
+        verbose (bool, optional): whether to show the progress bar. Defaults to False.
 
     Raises:
         ValueError: raised when the initial position is not in the support of pdf (Only when pdf is given).
@@ -79,7 +82,7 @@ def langevin_montecarlo(
                     return z
             raise MaximumIterationError()
 
-    for k in trange(1, n_steps):
+    for k in (trange if verbose else range)(1, n_steps):
         xs[k] = suc(xs[k-1])
 
     return xs
@@ -90,7 +93,9 @@ def euler(
     f: Callable[[np.ndarray, float], np.ndarray],
     t0: float,
     t1: float,
-    n_steps: int
+    n_steps: int,
+    *,
+    verbose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Generate samples from the Euler method.
 
@@ -100,6 +105,7 @@ def euler(
         t0 (float): initial time.
         t1 (float): final time.
         n_steps (int): number of steps.
+        verbose (bool, optional): whether to show the progress bar. Defaults to False.
 
     Returns:
         np.ndarray: time points.
@@ -113,7 +119,7 @@ def euler(
     dt = ts[1] - ts[0]
     xs = np.zeros((n_steps,)+x0.shape)
     xs[0] = x0
-    for k in trange(1, n_steps):
+    for k in (trange if verbose else range)(1, n_steps):
         xs[k] = xs[k-1] + f(xs[k-1], ts[k-1]) * dt
     return ts, xs
 
@@ -125,6 +131,8 @@ def euler_maruyama(
     t0: float,
     t1: float,
     n_steps: int,
+    *,
+    verbose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Generate samples from the Euler-Maruyama method.
 
@@ -135,6 +143,7 @@ def euler_maruyama(
         t0 (float): initial time.
         t1 (float): final time.
         n_steps (int): number of steps.
+        verbose (bool, optional): whether to show the progress bar. Defaults to False.
 
     Returns:
         np.ndarray: time points.
@@ -148,7 +157,7 @@ def euler_maruyama(
     dt = ts[1] - ts[0]
     xs = np.zeros((n_steps,)+x0.shape)
     xs[0] = x0
-    for k in trange(1, n_steps):
+    for k in (trange if verbose else range)(1, n_steps):
         xs[k] = xs[k-1]
         xs[k] += f(xs[k-1], ts[k-1]) * dt
         xs[k] += g(xs[k-1], ts[k-1]) * np.sqrt(abs(dt)) * np.random.randn(*x0.shape)  # noqa
