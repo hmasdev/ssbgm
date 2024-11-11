@@ -87,9 +87,11 @@ class ScoreBasedGenerator(BaseEstimator):
         self,
         estimator: BaseEstimator,
         random_state: int = 0,
+        verbose: bool = False,
     ):
         self.estimator = estimator
         self.random_state = random_state
+        self.verbose = verbose
 
         self._large_value: float = 1e12
 
@@ -246,6 +248,7 @@ class ScoreBasedGenerator(BaseEstimator):
                     # MALA use the min(1, (pdf(z_k^l) q(x_{k-1}|z_k^l)) / (pdf(x_{k-1}) q(z_k^l|x_{k-1}))).  # noqa
                     # So, there is a pair of (z_k^l, x_{k-1}) that both are in the valid domain but z_k^l is rejected.  # noqa
                     # To avoid this, the large value is multiplied to pdf.
+                    verbose=self.verbose,
                 )[-1]
 
         # Output: (n_samples, N, n_outputs)
@@ -263,6 +266,7 @@ class ScoreBasedGenerator(BaseEstimator):
             # MALA use the min(1, (pdf(z_k^l) q(x_{k-1}|z_k^l)) / (pdf(x_{k-1}) q(z_k^l|x_{k-1}))).  # noqa
             # So, there is a pair of (z_k^l, x_{k-1}) that both are in the valid domain but z_k^l is rejected.  # noqa
             # To avoid this, the large value is multiplied to pdf.
+            verbose=self.verbose,
         ).reshape(n_samples+n_warmup, -1, self.n_outputs_)[n_warmup:]
 
     def _sample_euler(
@@ -308,6 +312,7 @@ class ScoreBasedGenerator(BaseEstimator):
             t0=max(self.noise_strengths_)**2,
             t1=0,
             n_steps=n_steps,
+            verbose=self.verbose,
         )[1].reshape(n_steps, n_samples, N, self.n_outputs_)
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
@@ -357,6 +362,7 @@ class ScoreBasedGenerator(BaseEstimator):
             t0=max(self.noise_strengths_)**2,
             t1=0,
             n_steps=n_steps,
+            verbose=self.verbose,
         )[1].reshape(n_steps, n_samples, N, self.n_outputs_)
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
