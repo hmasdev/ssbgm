@@ -10,7 +10,7 @@ def langevin_montecarlo(
     delta_t: float = 0.1,
     n_steps: int = 1000,
     pdf: Callable[[np.ndarray], float] | None = None,
-    max_n_iter_until_accept: int = 100,
+    max_n_iter_until_accept: int = 1000,
     *,
     verbose: bool = False,
 ) -> np.ndarray:
@@ -26,7 +26,7 @@ def langevin_montecarlo(
         pdf (Callable[[np.ndarray], np.ndarray], optional): probability density function. Defaults to None.
             When pdf is given, `langenvin_montecarlo` behaves as Metropolis-Adjusted Langevin Algorithm.
             See https://en.wikipedia.org/wiki/Metropolis-adjusted_Langevin_algorithm .
-            Shape: (n_outputs, ) -> (N,).
+            Shape: (n_outputs, ) -> float.
         max_n_iter_until_accept (int, optional): maximum number of iterations until accept. Defaults to 100.
         verbose (bool, optional): whether to show the progress bar. Defaults to False.
 
@@ -71,23 +71,43 @@ def langevin_montecarlo(
         raise ValueError(f"x0 must be in the support of pdf. But pdf(x0) = {pdf(x0[0])}")  # noqa
 
     # define the proposal function
-    def suc(x: np.ndarray) -> np.ndarray:
-        return x - nabla_U(x) * delta_t + np.random.randn(*x0.shape) * np.sqrt(2*delta_t)  # type: ignore # noqa
+    def suc(x: np.ndarray, *kwargs) -> np.ndarray:
+        return x - nabla_U(x) * delta_t + np.random.randn(*x.shape) * np.sqrt(2*delta_t)  # type: ignore # noqa
 
     if pdf is not None:
         _suc = suc
 
         def q(x: np.ndarray, y: np.ndarray) -> float:
+            # x: (n_outputs,), y: (1, n_outputs)
             return np.exp(-np.sum((x-y+nabla_U(y)*delta_t)**2)/(4*delta_t))  # type: ignore # noqa
 
-        def suc(x: np.ndarray) -> np.ndarray:
-            for _ in range(max_n_iter_until_accept):
-                z = _suc(x)
-                nume = pdf(z) * q(x, z)
-                denom = pdf(x) * q(z, x)
-                if np.random.rand() < min(1, nume/denom):
-                    return z
-            raise MaximumIterationError()
+        def suc(  # type: ignore # noqa
+            x: np.ndarray,
+            n_remains: int = max_n_iter_until_accept,
+        ) -> np.ndarray:
+            N = x.shape[0]
+            L = 10  # FIXME: magic number
+            # x: (N, n_outputs)
+            # zs: (L, N, n_outputs)
+            zs = np.array([_suc(x) for _ in range(L)])
+            # acceptance threshold
+            prob_z_ln = np.array([[pdf(zs[l, n]) for n in range(N)] for l in range(L)]).reshape(L, N)  # (L, N) # noqa
+            prob_x_n = np.array([pdf(xi) for xi in x]).reshape(N)  # (N,) # noqa
+            q_xz_nl = np.array([np.exp(-np.sum((x[n]-zs[:, n]+nabla_U(zs[:, n])*delta_t)**2, axis=1)/(4*delta_t)) for n in range(N)]).reshape(N, L)  # (N, L) # noqa
+            q_zx_ln = np.array([np.exp(-np.sum((zs[l]-x+nabla_U(x)*delta_t)**2, axis=1)/(4*delta_t)) for l in range(L)]).reshape(L, N)  # (L, N) # noqa
+            alphas = np.einsum('ln,n,nl,ln->ln', prob_z_ln, 1/prob_x_n, q_xz_nl, 1/q_zx_ln)  # (L, N)  # type: ignore # noqa
+            # accept or not
+            u = np.random.rand(*alphas.shape)
+            accept = u < alphas
+            accepted_idx = np.argmax(accept, axis=0)
+            z = np.array([zs[l, n] for n, l in enumerate(accepted_idx)])
+            all_rejected = np.all(~accept, axis=0)
+            # retry for all rejected samples
+            if all_rejected.any():
+                if n_remains == 0:
+                    raise MaximumIterationError()
+                z[all_rejected] = suc(x[all_rejected], n_remains-1)
+            return z
 
     for k in (trange if verbose else range)(1, n_steps):
         xs[k] = suc(xs[k-1])

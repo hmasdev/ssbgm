@@ -139,16 +139,18 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions_with_doma
     minx1 = 2
     maxx1 = 5.5
 
-    n_samples = 128
+    n_steps = 101
+    n_samples = 64
     alpha = 0.1
     X = np.array([[1, 2], [3, 4], [5, 6]])
-    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm = ScoreBasedGenerator(estimator=LinearRegression(), verbose=True)
     sbm.fit(X)
     samples = sbm._sample_langenvin_montecarlo(
         n_samples=n_samples,
         alpha=alpha,
-        init_sample=np.array([[2, 3]]),
-        is_in_valid_domain_func=lambda x: ((minx0 <= x[0, 0])*(x[0, 0] <= maxx0)*(minx1 <= x[0, 1])*(x[0, 1] <= maxx1)),  # noqa
+        init_sample=np.array([2, 3]),
+        n_steps=n_steps,
+        is_in_valid_domain_func=lambda x: ((minx0 <= x[0])*(x[0] <= maxx0)*(minx1 <= x[1])*(x[1] <= maxx1)),  # noqa
     )
     assert samples.shape == (n_samples, 1, X.shape[1])
     samples = samples.reshape(n_samples, X.shape[1])
@@ -161,6 +163,15 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions_with_doma
             X,
             n_samples=n_samples,
             alpha=alpha,
+        )
+
+    # with init_sample is out-of-domain
+    with pytest.raises(ValueError):
+        sbm._sample_langenvin_montecarlo(
+            n_samples=n_samples,
+            alpha=alpha,
+            init_sample=np.array([minx0-1000, minx1-1000]),
+            is_in_valid_domain_func=lambda x: ((minx0 <= x[0])*(x[0] <= maxx0)*(minx1 <= x[1])*(x[1] <= maxx1)),  # noqa
         )
 
 

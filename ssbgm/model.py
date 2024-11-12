@@ -83,7 +83,7 @@ class ScoreBasedGenerator(BaseEstimator):
 
     - learn p'(x)/p(x) //ssif a training dataset \\{x_n\\}_{n=1}^N is given
     - learn p'(y|x)/p(y|x) //ssif a training dataset \\{(x_n, y_n)\\}_{n=1}^N is given
-    '''
+    '''  # noqa
 
     class SamplingMethod(Enum):
         LANGEVIN_MONTECARLO: str = 'langevin_montecarlo'
@@ -228,6 +228,11 @@ class ScoreBasedGenerator(BaseEstimator):
                 (n_steps, n_samples, N, n_outputs) shape array if return_paths is True.
                 (n_samples, N, n_outputs) shape array if return_paths is False.
         """  # noqa
+
+        # validation
+        if init_sample is not None:
+            assert init_sample.ndim == 1 and init_sample.size == self.n_outputs_, f'init_sample must be (n_outputs,) shape array. But init_sample.shape = {init_sample.shape}'  # noqa
+
         if X is None:
             # x: (n_samples, n_outputs)
             if init_sample is not None:
@@ -243,7 +248,7 @@ class ScoreBasedGenerator(BaseEstimator):
                 if init_sample.size == self.n_outputs_:
                     x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*X.shape[0]*n_samples)  # noqa
                 else:
-                    assert x0.shape == (X.shape[0], self.n_outputs_)
+                    assert init_sample.shape == (X.shape[0], self.n_outputs_)
                     x0 = np.repeat(init_sample, n_samples, axis=0)
             else:
                 x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
