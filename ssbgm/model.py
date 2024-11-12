@@ -77,6 +77,13 @@ def create_noised_data(
 
 
 class ScoreBasedGenerator(BaseEstimator):
+    '''Score-based generator
+
+    This model learns the score function of the target distribution from training data.
+
+    - learn p'(x)/p(x) //ssif a training dataset \\{x_n\\}_{n=1}^N is given
+    - learn p'(y|x)/p(y|x) //ssif a training dataset \\{(x_n, y_n)\\}_{n=1}^N is given
+    '''
 
     class SamplingMethod(Enum):
         LANGEVIN_MONTECARLO: str = 'langevin_montecarlo'
@@ -106,8 +113,8 @@ class ScoreBasedGenerator(BaseEstimator):
         r"""Train the score-function
 
         Args:
-            X (np.ndarray): Generated data, or conditions if y is given. Shape: (N, D).
-            y (np.ndarray | None, optional): Generated data given X. Defaults to None. Shape: (N, D).
+            X (np.ndarray): Generated data, or conditions if y is given. Shape: (N, M or n_outputs).
+            y (np.ndarray | None, optional): Generated data given X. Defaults to None. Shape: (N, n_outputs) if given.
             noise_strengths (Iterable[float] | None, optional): noise strengths. Defaults to None.
                 If noise_strengths is None, noise_strengths is set to np.sqrt(np.logspace(-3, {OBSERVED STD}, 11))  # noqa
             keep_noised_data (bool, optional): flag to keep noised data. Defaults to False.
@@ -161,7 +168,7 @@ class ScoreBasedGenerator(BaseEstimator):
         """Predict the mean and standard deviation of the generated data.
 
         Args:
-            X (np.ndarray | None, optional): conditions. Defaults to None.
+            X (np.ndarray | None, optional): conditions. Defaults to None. Shape: (N, M) if given.
             aggregate (Literal['mean', 'median'], optional): aggregation method. Defaults to 'mean'.
             return_std (bool, optional): flag to return standard deviation. Defaults to False.
 
@@ -206,6 +213,7 @@ class ScoreBasedGenerator(BaseEstimator):
 
         Args:
             X (np.ndarray | None, optional): conditions. Defaults to None.
+                Shape: (N, M) if it is not None.
             init_sample (np.ndarray | None, optional): initial sample. Defaults to None.
                 (n_outputs,) shape array if it is not None.
             n_samples (int, optional): number of samples. Defaults to 1000.
@@ -300,6 +308,7 @@ class ScoreBasedGenerator(BaseEstimator):
 
         Args:
             X (np.ndarray | None, optional): conditions. Defaults to None.
+                Shape: (N, M) if it is not None.
             n_samples (int, optional): number of samples. Defaults to 1000.
             n_steps (int, optional): number of steps. Defaults to 1000.
             return_paths (bool, optional): flag to return paths. Defaults to False.
