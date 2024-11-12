@@ -10,22 +10,28 @@ def langevin_montecarlo(
     delta_t: float = 0.1,
     n_steps: int = 1000,
     pdf: Callable[[np.ndarray], float] | None = None,
-    max_n_iter_until_accept: int = 100,
+    max_n_iter_until_accept: int = 1000,
     *,
+    use_pdf_as_domain_indicator: bool = False,
     verbose: bool = False,
 ) -> np.ndarray:
     """Generate samples from the Langevin Monte Carlo algorithm.
 
     Args:
         x0 (np.ndarray): initial position of the chain.
+            Shape: (N, n_outputs) or (n_outputs,).
         nabla_U (Callable[[np.ndarray], np.ndarray]): gradient of the potential energy function.
+            Shape: (N, n_outputs) -> (N, n_outputs).
         delta_t (float, optional): time step. Defaults to 0.1.
         n_steps (int, optional): number of steps. Defaults to 1000.
         pdf (Callable[[np.ndarray], np.ndarray], optional): probability density function. Defaults to None.
             When pdf is given, `langenvin_montecarlo` behaves as Metropolis-Adjusted Langevin Algorithm.
             See https://en.wikipedia.org/wiki/Metropolis-adjusted_Langevin_algorithm .
-            Note that the shape of argument of pdf must be the same as x0.
+            Shape: (n_outputs, ) -> float.
         max_n_iter_until_accept (int, optional): maximum number of iterations until accept. Defaults to 100.
+        use_pdf_as_domain_indicator (bool, optional): whether to use pdf as a domain indicator. Defaults to False.
+            If True, pdf is used as a domain indicator. That is, the proposal is rejected when pdf(x) = 0.
+            Just valid when pdf is given.
         verbose (bool, optional): whether to show the progress bar. Defaults to False.
 
     Raises:
@@ -55,37 +61,85 @@ def langevin_montecarlo(
             3. return x0, x1, ..., x_{n_steps}
     """  # noqa
 
-    # validation
-    if pdf is not None and pdf(x0) <= 0:
-        raise ValueError(f"x0 must be in the support of pdf. But pdf(x0) = {pdf(x0)}")  # noqa
-
     # Initalize
+    x0dim = x0.ndim
+    assert x0dim in (1, 2), f"x0 must be 1D or 2D array. But x0.ndim = {x0.ndim}"  # noqa
+    if x0dim == 1:
+        x0 = x0.reshape(1, -1)
+    # NOTE: x0.shape = (1, n_outputs) or (N, n_outputs)
     xs = np.zeros((n_steps,)+x0.shape)
     xs[0] = x0
 
+    # validation
+    if pdf is not None and pdf(x0[0]) <= 0:
+        raise ValueError(f"x0 must be in the support of pdf. But pdf(x0) = {pdf(x0[0])}")  # noqa
+
     # define the proposal function
-    def suc(x: np.ndarray) -> np.ndarray:
-        return x - nabla_U(x) * delta_t + np.random.randn(*x0.shape) * np.sqrt(2*delta_t)  # type: ignore # noqa
+    def _suc(x: np.ndarray, *kwargs) -> np.ndarray:
+        return x - nabla_U(x) * delta_t + np.random.randn(*x.shape) * np.sqrt(2*delta_t)  # type: ignore # noqa
 
-    if pdf is not None:
-        _suc = suc
-
-        def q(x: np.ndarray, y: np.ndarray) -> float:
-            return np.exp(-np.sum((x-y+nabla_U(y)*delta_t)**2)/(4*delta_t))  # type: ignore # noqa
-
-        def suc(x: np.ndarray) -> np.ndarray:
-            for _ in range(max_n_iter_until_accept):
-                z = _suc(x)
-                nume = pdf(z) * q(x, z)
-                denom = pdf(x) * q(z, x)
-                if np.random.rand() < min(1, nume/denom):
-                    return z
-            raise MaximumIterationError()
+    if pdf is None:
+        suc = _suc
+    elif use_pdf_as_domain_indicator:
+        def suc(  # type: ignore
+            x: np.ndarray,
+            n_remains: int = max_n_iter_until_accept,
+        ) -> np.ndarray:
+            N = x.shape[0]
+            L = 10  # FIXME: magic number
+            # x: (N, n_outputs)
+            # zs: (L, N, n_outputs)
+            zs = np.array([_suc(x) for _ in range(L)])
+            # acceptance threshold
+            prob_z_ln = np.array([[pdf(zs[l, n]) for n in range(N)] for l in range(L)]).reshape(L, N)  # (L, N) # noqa
+            # accept or not
+            accept = prob_z_ln > 0
+            accepted_idx = np.argmax(accept, axis=0)
+            z = np.array([zs[l, n] for n, l in enumerate(accepted_idx)])
+            all_rejected = np.all(~accept, axis=0)
+            # retry for all rejected samples
+            if all_rejected.any():
+                if n_remains == 0:
+                    raise MaximumIterationError()
+                z[all_rejected] = suc(x[all_rejected], n_remains-1)
+            return z
+    else:
+        def suc(  # type: ignore
+            x: np.ndarray,
+            n_remains: int = max_n_iter_until_accept,
+        ) -> np.ndarray:
+            N = x.shape[0]
+            L = 10  # FIXME: magic number
+            # x: (N, n_outputs)
+            # zs: (L, N, n_outputs)
+            zs = np.array([_suc(x) for _ in range(L)])
+            # acceptance threshold
+            prob_z_ln = np.array([[pdf(zs[l, n]) for n in range(N)] for l in range(L)]).reshape(L, N)  # (L, N) # noqa
+            prob_x_n = np.array([pdf(xi) for xi in x]).reshape(N)  # (N,) # noqa
+            q_xz_nl = np.array([np.exp(-np.sum((x[n]-zs[:, n]+nabla_U(zs[:, n])*delta_t)**2, axis=1)/(4*delta_t)) for n in range(N)]).reshape(N, L)  # (N, L) # noqa
+            q_zx_ln = np.array([np.exp(-np.sum((zs[l]-x+nabla_U(x)*delta_t)**2, axis=1)/(4*delta_t)) for l in range(L)]).reshape(L, N)  # (L, N) # noqa
+            alphas = np.einsum('ln,n,nl,ln->ln', prob_z_ln, 1/prob_x_n, q_xz_nl, 1/q_zx_ln)  # (L, N)  # type: ignore # noqa
+            # accept or not
+            u = np.random.rand(*alphas.shape)
+            accept = u < alphas
+            accepted_idx = np.argmax(accept, axis=0)
+            z = np.array([zs[l, n] for n, l in enumerate(accepted_idx)])
+            all_rejected = np.all(~accept, axis=0)
+            # retry for all rejected samples
+            if all_rejected.any():
+                if n_remains == 0:
+                    raise MaximumIterationError()
+                z[all_rejected] = suc(x[all_rejected], n_remains-1)
+            return z
 
     for k in (trange if verbose else range)(1, n_steps):
         xs[k] = suc(xs[k-1])
 
-    return xs
+    assert xs.shape == (n_steps, *x0.shape), "Internal Error"
+    if x0dim == 1:
+        return xs.reshape(n_steps, -1)
+    else:
+        return xs
 
 
 def euler(
@@ -101,7 +155,9 @@ def euler(
 
     Args:
         x0 (np.ndarray): initial position of the chain.
-        f (Callable[[np.ndarray], np.ndarray]): vector field.
+            Shape: (n_outputs,) or (N, n_outputs).
+        f (Callable[[np.ndarray, float], np.ndarray]): vector field.
+            Shape: (N, n_outputs,), float -> (N, n_outputs,).
         t0 (float): initial time.
         t1 (float): final time.
         n_steps (int): number of steps.
@@ -117,11 +173,21 @@ def euler(
     """  # noqa
     ts = np.linspace(t0, t1, n_steps)
     dt = ts[1] - ts[0]
+
+    x0dim = x0.ndim
+    assert x0dim in (1, 2), f"x0 must be 1D or 2D array. But x0.ndim = {x0.ndim}"  # noqa
+    if x0dim == 1:
+        x0 = x0.reshape(1, -1)
     xs = np.zeros((n_steps,)+x0.shape)
     xs[0] = x0
     for k in (trange if verbose else range)(1, n_steps):
         xs[k] = xs[k-1] + f(xs[k-1], ts[k-1]) * dt
-    return ts, xs
+
+    assert xs.shape == (n_steps, *x0.shape), "Internal Error"
+    if x0dim == 1:
+        return ts, xs.reshape(n_steps, -1)
+    else:
+        return ts, xs
 
 
 def euler_maruyama(
@@ -138,8 +204,11 @@ def euler_maruyama(
 
     Args:
         x0 (np.ndarray): initial position of the chain.
-        f (Callable[[np.ndarray], np.ndarray]): vector field.
-        g (Callable[[np.ndarray], np.ndarray]): noise vector field.
+            Shape: (n_outputs,) or (N, n_outputs).
+        f (Callable[[np.ndarray, float], np.ndarray]): vector field.
+            Shape: (N, n_outputs,), float -> (N, n_outputs,).
+        g (Callable[[np.ndarray, float], np.ndarray]): noise vector field.
+            Shape: (N, n_outputs,), float -> (N, n_outputs,).
         t0 (float): initial time.
         t1 (float): final time.
         n_steps (int): number of steps.
@@ -155,10 +224,21 @@ def euler_maruyama(
     """  # noqa
     ts = np.linspace(t0, t1, n_steps)
     dt = ts[1] - ts[0]
+
+    x0dim = x0.ndim
+    assert x0dim in (1, 2), f"x0 must be 1D or 2D array. But x0.ndim = {x0.ndim}"  # noqa
+    if x0dim == 1:
+        x0 = x0.reshape(1, -1)
+
     xs = np.zeros((n_steps,)+x0.shape)
     xs[0] = x0
     for k in (trange if verbose else range)(1, n_steps):
         xs[k] = xs[k-1]
         xs[k] += f(xs[k-1], ts[k-1]) * dt
         xs[k] += g(xs[k-1], ts[k-1]) * np.sqrt(abs(dt)) * np.random.randn(*x0.shape)  # noqa
-    return ts, xs
+
+    assert xs.shape == (n_steps, *x0.shape), "Internal Error"
+    if x0dim == 1:
+        return ts, xs.reshape(n_steps, -1)
+    else:
+        return ts, xs
