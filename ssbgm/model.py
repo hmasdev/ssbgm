@@ -100,7 +100,7 @@ class ScoreBasedGenerator(BaseEstimator):
         X: np.ndarray,
         y: np.ndarray | None = None,
         *,
-        noise_strengths: Iterable[float] = np.sqrt(np.linspace(0, 10, 11)[1:]),  # noqa
+        noise_strengths: Iterable[float] | None = None,
         keep_noised_data: bool = False,
     ) -> TScoreBasedGenerator:
         r"""Train the score-function
@@ -108,7 +108,8 @@ class ScoreBasedGenerator(BaseEstimator):
         Args:
             X (np.ndarray): Generated data, or conditions if y is given. Shape: (N, D).
             y (np.ndarray | None, optional): Generated data given X. Defaults to None. Shape: (N, D).
-            noise_strengths (Iterable[float], optional): noise strengths. Defaults to np.sqrt(np.linspace(0, 10, 101)[1:]).
+            noise_strengths (Iterable[float] | None, optional): noise strengths. Defaults to None.
+                If noise_strengths is None, noise_strengths is set to np.sqrt(np.logspace(-3, {OBSERVED STD}, 11))  # noqa
             keep_noised_data (bool, optional): flag to keep noised data. Defaults to False.
 
         Returns:
@@ -127,6 +128,10 @@ class ScoreBasedGenerator(BaseEstimator):
             # if y is given, model learns the score function of y given X
             X, y = check_X_y(X, y, multi_output=True)
             assert y is not None
+
+        # preprocess noise_strengths
+        if noise_strengths is None:
+            noise_strengths = np.sqrt(np.logspace(-3, y.var(axis=0).max(), 11))  # noqa
 
         self.noise_strengths_ = noise_strengths
         self.n_outputs_ = y.shape[1] if y.ndim > 1 else 1
