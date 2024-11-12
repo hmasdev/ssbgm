@@ -195,9 +195,11 @@ class ScoreBasedGenerator(BaseEstimator):
         *,
         init_sample: np.ndarray | None = None,
         n_samples: int = 1000,
+        n_steps: int = 1000,
         n_warmup: int = 100,
         alpha: float = 0.1,
         sigma: float | None = None,
+        return_paths: bool = False,
         is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,
     ) -> np.ndarray:
         """Generate samples from the Langevin Monte Carlo algorithm.
@@ -207,31 +209,40 @@ class ScoreBasedGenerator(BaseEstimator):
             init_sample (np.ndarray | None, optional): initial sample. Defaults to None.
                 (n_outputs,) shape array if it is not None.
             n_samples (int, optional): number of samples. Defaults to 1000.
+            n_steps (int, optional): number of steps. Defaults to 1000.
             n_warmup (int, optional): number of warmup steps before generating samples. Defaults to 100.
             alpha (float, optional): time step size of the Langevin Monte Carlo algorithm. Defaults to 0.1.
             sigma (float | None, optional): noise strength. Defaults to None.
+            return_paths (bool, optional): flag to return paths. Defaults to False.
             is_in_valid_domain_func (Callable[[np.ndarray], bool] | None, optional): function to check whether the sample is in the valid domain. Defaults to None.
                 When is_in_valid_domain_func is given, _sample_langenvin_montecarlo draws samples with Metropolis-adjusted Langevin algorithm in stead of Langevin Monte Carlo algorithm.
 
         Returns:
             np.ndarray: samples from the Langevin Monte Carlo algorithm.
-                (n_samples, N, n_outputs) shape array.
+                (n_steps, n_samples, N, n_outputs) shape array if return_paths is True.
+                (n_samples, N, n_outputs) shape array if return_paths is False.
         """  # noqa
         if X is None:
-            # x: (1, n_outputs)
+            # x: (n_samples, n_outputs)
             if init_sample is not None:
-                x0 = init_sample.reshape(1, self.n_outputs_)
+                x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*n_samples)  # noqa
             else:
-                x0 = np.random.randn(1, self.n_outputs_) * np.sqrt(max(self.noise_strengths_))  # noqa
+                x0 = np.random.randn(n_samples, self.n_outputs_) * max(self.noise_strengths_)  # noqa
 
             def dU(x, sigma):
                 return - self.estimator_.predict(np.hstack([x, np.array([[sigma]]*len(x))])).reshape(*x.shape)  # noqa
         else:
-            # x: (N, n_outputs)
+            # x: (n_samples * N, n_outputs)
             if init_sample is not None:
-                x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*X.shape[0])  # noqa
+                if init_sample.size == self.n_outputs_:
+                    x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*X.shape[0]*n_samples)  # noqa
+                else:
+                    assert x0.shape == (X.shape[0], self.n_outputs_)
+                    x0 = np.repeat(init_sample, n_samples, axis=0)
             else:
-                x0 = np.random.randn(X.shape[0], self.n_outputs_)*np.sqrt(max(self.noise_strengths_))  # noqa
+                x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
+
+            X = np.repeat(X, n_samples, axis=0)
 
             def dU(x, sigma):
                 return - self.estimator_.predict(np.hstack([X, x, np.array([[sigma]]*len(x))])).reshape(*x.shape)  # noqa
@@ -242,7 +253,7 @@ class ScoreBasedGenerator(BaseEstimator):
                 x0 = langevin_montecarlo(
                     x0=x0,
                     nabla_U=partial(dU, sigma=sigma),
-                    n_steps=n_warmup + n_samples,
+                    n_steps=n_warmup + n_steps,
                     delta_t=alpha,
                     pdf=(lambda x: self._large_value * is_in_valid_domain_func(x)) if is_in_valid_domain_func is not None else None,  # noqa
                     # NOTE:
@@ -257,10 +268,10 @@ class ScoreBasedGenerator(BaseEstimator):
                 )[-1]
 
         # Output: (n_samples, N, n_outputs)
-        return langevin_montecarlo(
+        paths = langevin_montecarlo(
             x0=x0,
             nabla_U=partial(dU, sigma=sigma),
-            n_steps=n_warmup + n_samples,
+            n_steps=n_warmup + n_steps,
             delta_t=alpha,
             pdf=(lambda x: self._large_value * is_in_valid_domain_func(x)) if is_in_valid_domain_func is not None else None,  # noqa
             # NOTE:
@@ -272,7 +283,10 @@ class ScoreBasedGenerator(BaseEstimator):
             # So, there is a pair of (z_k^l, x_{k-1}) that both are in the valid domain but z_k^l is rejected.  # noqa
             # To avoid this, the large value is multiplied to pdf.
             verbose=self.verbose,
-        ).reshape(n_samples+n_warmup, -1, self.n_outputs_)[n_warmup:]
+        ).reshape(n_warmup+n_steps, n_samples, -1, self.n_outputs_)[n_warmup:]
+
+        # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
+        return paths if return_paths else paths[-1]
 
     def _sample_euler(
         self,
@@ -304,7 +318,7 @@ class ScoreBasedGenerator(BaseEstimator):
                 return - 0.5 * self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)  # noqa
         else:
             # x: (n_samples * N, n_outputs)
-            x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*np.sqrt(max(self.noise_strengths_))  # noqa
+            x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
             N = X.shape[0]
             X = np.repeat(X, n_samples, axis=0)
 
@@ -353,7 +367,7 @@ class ScoreBasedGenerator(BaseEstimator):
                 return - self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)  # noqa
         else:
             # x: (n_samples * N, n_outputs)
-            x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*np.sqrt(max(self.noise_strengths_))  # noqa
+            x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
             N = X.shape[0]
             X = np.repeat(X, n_samples, axis=0)
 
@@ -379,13 +393,13 @@ class ScoreBasedGenerator(BaseEstimator):
         *,
         n_samples: int = 1000,
         sampling_method: SamplingMethod = SamplingMethod.LANGEVIN_MONTECARLO,
+        n_steps: int = 1000,
+        return_paths: bool = False,
         n_warmup: int = 100,  # only for langevin monte carlo
         alpha: float = 0.1,  # only for langevin monte carlo
         sigma: float | None = None,  # only for langevin monte carlo
         init_sample: np.ndarray | None = None,  # only for langevin monte carlo
         is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,  # only for langevin monte carlo # noqa
-        n_steps: int = 1000,  # only for euler, euler-maruyama
-        return_paths: bool = False,  # only for euler, euler-maruyama
         seed: int | None = None,
     ) -> np.ndarray:
         """Generate samples from the score-based generator.
@@ -394,6 +408,8 @@ class ScoreBasedGenerator(BaseEstimator):
             X (np.ndarray | None, optional): conditions. Defaults to None.
             n_samples (int, optional): number of samples. Defaults to 1000.
             sampling_method (SamplingMethod, optional): sampling method. Defaults to SamplingMethod.LANGEVIN_MONTECARLO.
+            n_steps (int, optional): number of steps. Defaults to 1000.
+            return_paths (bool, optional): flag to return paths. Defaults to False.
 
             n_warmup (int, optional): number of warmup steps before generating samples. Defaults to 100. (NOTE: only for langevin monte carlo)
             alpha (float, optional): time step size of the Langevin Monte Carlo algorithm. Defaults to 0.1. (NOTE: only for langevin monte carlo)
@@ -401,9 +417,6 @@ class ScoreBasedGenerator(BaseEstimator):
             init_sample (np.ndarray | None, optional): initial sample. Defaults to None. (n_outputs,) shape array if it is not None.  (NOTE: only for langevin monte carlo)
             is_in_valid_domain_func (Callable[[np.ndarray], bool] | None, optional): function to check whether the sample is in the valid domain. Defaults to None. (NOTE: only for langevin monte carlo)
                 When is_in_valid_domain_func is given, _sample_langenvin_montecarlo draws samples with Metropolis-adjusted Langevin algorithm in stead of Langevin Monte Carlo algorithm.
-
-            n_steps (int, optional): number of steps. Defaults to 1000. (NOTE: only for euler, euler-maruyama)
-            return_paths (bool, optional): flag to return paths. Defaults to False. (NOTE: only for euler, euler-maruyama)
 
             seed (int, optional): random seed. Defaults to None.
 
