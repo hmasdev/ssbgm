@@ -12,6 +12,7 @@ def langevin_montecarlo(
     pdf: Callable[[np.ndarray], float] | None = None,
     max_n_iter_until_accept: int = 1000,
     *,
+    use_pdf_as_domain_indicator: bool = False,
     verbose: bool = False,
 ) -> np.ndarray:
     """Generate samples from the Langevin Monte Carlo algorithm.
@@ -28,6 +29,9 @@ def langevin_montecarlo(
             See https://en.wikipedia.org/wiki/Metropolis-adjusted_Langevin_algorithm .
             Shape: (n_outputs, ) -> float.
         max_n_iter_until_accept (int, optional): maximum number of iterations until accept. Defaults to 100.
+        use_pdf_as_domain_indicator (bool, optional): whether to use pdf as a domain indicator. Defaults to False.
+            If True, pdf is used as a domain indicator. That is, the proposal is rejected when pdf(x) = 0.
+            Just valid when pdf is given.
         verbose (bool, optional): whether to show the progress bar. Defaults to False.
 
     Raises:
@@ -71,17 +75,36 @@ def langevin_montecarlo(
         raise ValueError(f"x0 must be in the support of pdf. But pdf(x0) = {pdf(x0[0])}")  # noqa
 
     # define the proposal function
-    def suc(x: np.ndarray, *kwargs) -> np.ndarray:
+    def _suc(x: np.ndarray, *kwargs) -> np.ndarray:
         return x - nabla_U(x) * delta_t + np.random.randn(*x.shape) * np.sqrt(2*delta_t)  # type: ignore # noqa
 
-    if pdf is not None:
-        _suc = suc
-
-        def q(x: np.ndarray, y: np.ndarray) -> float:
-            # x: (n_outputs,), y: (1, n_outputs)
-            return np.exp(-np.sum((x-y+nabla_U(y)*delta_t)**2)/(4*delta_t))  # type: ignore # noqa
-
-        def suc(  # type: ignore # noqa
+    if pdf is None:
+        suc = _suc
+    elif use_pdf_as_domain_indicator:
+        def suc(  # type: ignore
+            x: np.ndarray,
+            n_remains: int = max_n_iter_until_accept,
+        ) -> np.ndarray:
+            N = x.shape[0]
+            L = 10  # FIXME: magic number
+            # x: (N, n_outputs)
+            # zs: (L, N, n_outputs)
+            zs = np.array([_suc(x) for _ in range(L)])
+            # acceptance threshold
+            prob_z_ln = np.array([[pdf(zs[l, n]) for n in range(N)] for l in range(L)]).reshape(L, N)  # (L, N) # noqa
+            # accept or not
+            accept = prob_z_ln > 0
+            accepted_idx = np.argmax(accept, axis=0)
+            z = np.array([zs[l, n] for n, l in enumerate(accepted_idx)])
+            all_rejected = np.all(~accept, axis=0)
+            # retry for all rejected samples
+            if all_rejected.any():
+                if n_remains == 0:
+                    raise MaximumIterationError()
+                z[all_rejected] = suc(x[all_rejected], n_remains-1)
+            return z
+    else:
+        def suc(  # type: ignore
             x: np.ndarray,
             n_remains: int = max_n_iter_until_accept,
         ) -> np.ndarray:

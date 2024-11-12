@@ -275,6 +275,7 @@ class ScoreBasedGenerator(BaseEstimator):
                     # MALA use the min(1, (pdf(z_k^l) q(x_{k-1}|z_k^l)) / (pdf(x_{k-1}) q(z_k^l|x_{k-1}))).  # noqa
                     # So, there is a pair of (z_k^l, x_{k-1}) that both are in the valid domain but z_k^l is rejected.  # noqa
                     # To avoid this, the large value is multiplied to pdf.
+                    use_pdf_as_domain_indicator=True,
                     verbose=self.verbose,
                 )[-1]
 
@@ -293,6 +294,7 @@ class ScoreBasedGenerator(BaseEstimator):
             # MALA use the min(1, (pdf(z_k^l) q(x_{k-1}|z_k^l)) / (pdf(x_{k-1}) q(z_k^l|x_{k-1}))).  # noqa
             # So, there is a pair of (z_k^l, x_{k-1}) that both are in the valid domain but z_k^l is rejected.  # noqa
             # To avoid this, the large value is multiplied to pdf.
+            use_pdf_as_domain_indicator=True,
             verbose=self.verbose,
         ).reshape(n_steps, n_samples, -1, self.n_outputs_)
 
