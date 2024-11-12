@@ -112,14 +112,12 @@ def test_ScoreBasedGenerator_fit(
 
 def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions() -> None:  # noqa
     n_samples = 128
-    n_warmup = 101
     alpha = 0.1
     X = np.array([[1, 2], [3, 4], [5, 6]])
     sbm = ScoreBasedGenerator(estimator=LinearRegression())
     sbm.fit(X)
     samples = sbm._sample_langenvin_montecarlo(
         n_samples=n_samples,
-        n_warmup=n_warmup,
         alpha=alpha,
     )
     assert samples.shape == (n_samples, 1, X.shape[1])
@@ -130,7 +128,6 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions() -> None
         sbm._sample_langenvin_montecarlo(
             X,
             n_samples=n_samples,
-            n_warmup=n_warmup,
             alpha=alpha,
         )
 
@@ -143,14 +140,12 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions_with_doma
     maxx1 = 5.5
 
     n_samples = 128
-    n_warmup = 101
     alpha = 0.1
     X = np.array([[1, 2], [3, 4], [5, 6]])
     sbm = ScoreBasedGenerator(estimator=LinearRegression())
     sbm.fit(X)
     samples = sbm._sample_langenvin_montecarlo(
         n_samples=n_samples,
-        n_warmup=n_warmup,
         alpha=alpha,
         init_sample=np.array([[2, 3]]),
         is_in_valid_domain_func=lambda x: ((minx0 <= x[0, 0])*(x[0, 0] <= maxx0)*(minx1 <= x[0, 1])*(x[0, 1] <= maxx1)),  # noqa
@@ -165,7 +160,6 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions_with_doma
         sbm._sample_langenvin_montecarlo(
             X,
             n_samples=n_samples,
-            n_warmup=n_warmup,
             alpha=alpha,
         )
 
@@ -188,14 +182,12 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_w_conditions(
     y: np.ndarray,
 ) -> None:
     n_samples = 128
-    n_warmup = 101
     alpha = 0.1
     sbm = ScoreBasedGenerator(estimator=LinearRegression())
     sbm.fit(X, y)
     samples = sbm._sample_langenvin_montecarlo(
         X,
         n_samples=n_samples,
-        n_warmup=n_warmup,
         alpha=alpha,
     )
     assert samples.shape == (n_samples, X.shape[0], 1 if y.ndim == 1 else y.shape[1])  # noqa
@@ -205,7 +197,6 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_w_conditions(
         # FIXME: make it more specific
         sbm._sample_langenvin_montecarlo(
             n_samples=n_samples,
-            n_warmup=n_warmup,
             alpha=alpha,
         )
 
@@ -381,11 +372,11 @@ def test_ScoreBasedGenerator__sample_euler_maruyama_w_conditions(
             [
                 (
                     ScoreBasedGenerator.SamplingMethod.LANGEVIN_MONTECARLO,
-                    dict(n_warmup=101, alpha=0.1),
+                    dict(alpha=0.1),
                 ),
                 (
                     ScoreBasedGenerator.SamplingMethod.LANGEVIN_MONTECARLO,
-                    dict(n_warmup=101, alpha=0.1, init_sample=True),
+                    dict(alpha=0.1, init_sample=True),
                     # NOTE: init_sample will be replaced with an array
                 ),
                 (
@@ -437,11 +428,11 @@ def test_sample_wo_conditions(
             [
                 (
                     ScoreBasedGenerator.SamplingMethod.LANGEVIN_MONTECARLO,
-                    dict(n_warmup=101, alpha=0.1),
+                    dict(alpha=0.1),
                 ),
                 (
                     ScoreBasedGenerator.SamplingMethod.LANGEVIN_MONTECARLO,
-                    dict(n_warmup=101, alpha=0.1, init_sample=True),
+                    dict(alpha=0.1, init_sample=True),
                     # NOTE: init_sample will be replaced with an array
                 ),
                 (

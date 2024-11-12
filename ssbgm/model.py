@@ -203,7 +203,6 @@ class ScoreBasedGenerator(BaseEstimator):
         init_sample: np.ndarray | None = None,
         n_samples: int = 1000,
         n_steps: int = 1000,
-        n_warmup: int = 100,
         alpha: float = 0.1,
         sigma: float | None = None,
         return_paths: bool = False,
@@ -218,7 +217,6 @@ class ScoreBasedGenerator(BaseEstimator):
                 (n_outputs,) shape array if it is not None.
             n_samples (int, optional): number of samples. Defaults to 1000.
             n_steps (int, optional): number of steps. Defaults to 1000.
-            n_warmup (int, optional): number of warmup steps before generating samples. Defaults to 100.
             alpha (float, optional): time step size of the Langevin Monte Carlo algorithm. Defaults to 0.1.
             sigma (float | None, optional): noise strength. Defaults to None.
             return_paths (bool, optional): flag to return paths. Defaults to False.
@@ -261,7 +259,7 @@ class ScoreBasedGenerator(BaseEstimator):
                 x0 = langevin_montecarlo(
                     x0=x0,
                     nabla_U=partial(dU, sigma=sigma),
-                    n_steps=n_warmup + n_steps,
+                    n_steps=n_steps,
                     delta_t=alpha,
                     pdf=(lambda x: self._large_value * is_in_valid_domain_func(x)) if is_in_valid_domain_func is not None else None,  # noqa
                     # NOTE:
@@ -279,7 +277,7 @@ class ScoreBasedGenerator(BaseEstimator):
         paths = langevin_montecarlo(
             x0=x0,
             nabla_U=partial(dU, sigma=sigma),
-            n_steps=n_warmup + n_steps,
+            n_steps=n_steps,
             delta_t=alpha,
             pdf=(lambda x: self._large_value * is_in_valid_domain_func(x)) if is_in_valid_domain_func is not None else None,  # noqa
             # NOTE:
@@ -291,7 +289,7 @@ class ScoreBasedGenerator(BaseEstimator):
             # So, there is a pair of (z_k^l, x_{k-1}) that both are in the valid domain but z_k^l is rejected.  # noqa
             # To avoid this, the large value is multiplied to pdf.
             verbose=self.verbose,
-        ).reshape(n_warmup+n_steps, n_samples, -1, self.n_outputs_)[n_warmup:]
+        ).reshape(n_steps, n_samples, -1, self.n_outputs_)
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
         return paths if return_paths else paths[-1]
@@ -404,7 +402,6 @@ class ScoreBasedGenerator(BaseEstimator):
         sampling_method: SamplingMethod = SamplingMethod.LANGEVIN_MONTECARLO,
         n_steps: int = 1000,
         return_paths: bool = False,
-        n_warmup: int = 100,  # only for langevin monte carlo
         alpha: float = 0.1,  # only for langevin monte carlo
         sigma: float | None = None,  # only for langevin monte carlo
         init_sample: np.ndarray | None = None,  # only for langevin monte carlo
@@ -420,7 +417,6 @@ class ScoreBasedGenerator(BaseEstimator):
             n_steps (int, optional): number of steps. Defaults to 1000.
             return_paths (bool, optional): flag to return paths. Defaults to False.
 
-            n_warmup (int, optional): number of warmup steps before generating samples. Defaults to 100. (NOTE: only for langevin monte carlo)
             alpha (float, optional): time step size of the Langevin Monte Carlo algorithm. Defaults to 0.1. (NOTE: only for langevin monte carlo)
             sigma (float | None, optional): noise strength. Defaults to None. (NOTE: only for langevin monte carlo)
             init_sample (np.ndarray | None, optional): initial sample. Defaults to None. (n_outputs,) shape array if it is not None.  (NOTE: only for langevin monte carlo)
@@ -443,7 +439,6 @@ class ScoreBasedGenerator(BaseEstimator):
                 return self._sample_langenvin_montecarlo(
                     X,
                     n_samples=n_samples,
-                    n_warmup=n_warmup,
                     alpha=alpha,
                     sigma=sigma,
                     init_sample=init_sample,
