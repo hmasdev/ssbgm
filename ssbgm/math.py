@@ -86,51 +86,51 @@ def langevin_montecarlo(
             n_remains: int = max_n_iter_until_accept,
         ) -> np.ndarray:
             N = x.shape[0]
-            L = 10  # FIXME: magic number
+            L = 1  # FIXME: magic number
             # x: (N, n_outputs)
             # zs: (L, N, n_outputs)
             zs = np.array([_suc(x) for _ in range(L)])
             # acceptance threshold
-            prob_z_ln = np.array([[pdf(zs[l, n]) for n in range(N)] for l in range(L)]).reshape(L, N)  # (L, N) # noqa
+            prob_z_ln = np.apply_along_axis(pdf, -1, zs).reshape(L, N)
             # accept or not
             accept = prob_z_ln > 0
             accepted_idx = np.argmax(accept, axis=0)
-            z = np.array([zs[l, n] for n, l in enumerate(accepted_idx)])
+            z = zs[accepted_idx, np.arange(N)]
             all_rejected = np.all(~accept, axis=0)
             # retry for all rejected samples
             if all_rejected.any():
                 if n_remains == 0:
                     raise MaximumIterationError()
                 z[all_rejected] = suc(x[all_rejected], n_remains-1)
-            return z
+            return z  # type: ignore
     else:
         def suc(  # type: ignore
             x: np.ndarray,
             n_remains: int = max_n_iter_until_accept,
         ) -> np.ndarray:
             N = x.shape[0]
-            L = 10  # FIXME: magic number
+            L = 1  # FIXME: magic number
             # x: (N, n_outputs)
             # zs: (L, N, n_outputs)
             zs = np.array([_suc(x) for _ in range(L)])
             # acceptance threshold
-            prob_z_ln = np.array([[pdf(zs[l, n]) for n in range(N)] for l in range(L)]).reshape(L, N)  # (L, N) # noqa
-            prob_x_n = np.array([pdf(xi) for xi in x]).reshape(N)  # (N,) # noqa
-            q_xz_nl = np.array([np.exp(-np.sum((x[n]-zs[:, n]+nabla_U(zs[:, n])*delta_t)**2, axis=1)/(4*delta_t)) for n in range(N)]).reshape(N, L)  # (N, L) # noqa
-            q_zx_ln = np.array([np.exp(-np.sum((zs[l]-x+nabla_U(x)*delta_t)**2, axis=1)/(4*delta_t)) for l in range(L)]).reshape(L, N)  # (L, N) # noqa
-            alphas = np.einsum('ln,n,nl,ln->ln', prob_z_ln, 1/prob_x_n, q_xz_nl, 1/q_zx_ln)  # (L, N)  # type: ignore # noqa
+            prob_z_ln = np.apply_along_axis(pdf, -1, zs).reshape(L, N)
+            prob_x_n = np.apply_along_axis(pdf, -1, x).reshape(N)
+            q_xz_nl = np.array([np.exp(-np.sum((x[n]-zs[:, n]+nabla_U(zs[:, n])*delta_t)**2, axis=1)/(4*delta_t)) for n in range(N)]).reshape(N, L)  # noqa
+            q_zx_ln = np.array([np.exp(-np.sum((zs[l]-x+nabla_U(x)*delta_t)**2, axis=1)/(4*delta_t)) for l in range(L)]).reshape(L, N)  # noqa
+            alphas = np.einsum('ln,n,nl,ln->ln', prob_z_ln, 1/prob_x_n, q_xz_nl, 1/q_zx_ln)  # type: ignore # noqa
             # accept or not
             u = np.random.rand(*alphas.shape)
             accept = u < alphas
             accepted_idx = np.argmax(accept, axis=0)
-            z = np.array([zs[l, n] for n, l in enumerate(accepted_idx)])
+            z = zs[accepted_idx, np.arange(N)]
             all_rejected = np.all(~accept, axis=0)
             # retry for all rejected samples
             if all_rejected.any():
                 if n_remains == 0:
                     raise MaximumIterationError()
                 z[all_rejected] = suc(x[all_rejected], n_remains-1)
-            return z
+            return z  # type: ignore
 
     for k in (trange if verbose else range)(1, n_steps):
         xs[k] = suc(xs[k-1])
