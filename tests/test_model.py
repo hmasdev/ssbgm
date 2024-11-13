@@ -8,7 +8,6 @@ from ssbgm.model import (
 )
 
 # TODO: test whether calling ScoreBasedGenerator.sample raises NotFittedError when ScoreBasedGenerator is not fitted  # noqa
-# TODO: test whether calling ScoreBasedGenerator.predict
 
 
 @pytest.mark.parametrize(
@@ -483,3 +482,32 @@ def test_sample_with_invalid_sampling_method() -> None:
 
     with pytest.raises(ValueError):
         sbm.sample(sampling_method='invalid')  # type: ignore
+
+
+@pytest.mark.parametrize(
+    'X',
+    [
+        np.array([[1, 2], [3, 4], [5, 6], [10, 9]]),
+        np.array([[1], [2], [3]]),
+        np.array([1, 2, 3]),
+    ]
+)
+def test_ScoreBasedGenerator_predict(
+    X: np.ndarray,
+) -> None:
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.fit(X, noise_strengths=[1e-3, 1, 10])
+
+    mean_pred = sbm.predict()
+    if X.ndim == 1 or X.shape[1] == 1:
+        assert mean_pred.ndim == 0
+    else:
+        assert mean_pred.shape == (X.shape[1],)
+
+    mean_pred, std_pred = sbm.predict(return_std=True)
+    if X.ndim == 1 or X.shape[1] == 1:
+        assert mean_pred.ndim == 0
+        assert std_pred.ndim == 0
+    else:
+        assert mean_pred.shape == (X.shape[1],)
+        assert std_pred.shape == (X.shape[1],)

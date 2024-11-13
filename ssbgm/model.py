@@ -1,6 +1,6 @@
 from enum import Enum
 from functools import partial
-from typing import Callable, Iterable, Literal, TypeVar
+from typing import Callable, Iterable, Literal, overload, TypeVar
 import numpy as np
 import sklearn
 from sklearn.base import (
@@ -157,6 +157,28 @@ class ScoreBasedGenerator(BaseEstimator):
 
         return self
 
+    @overload
+    def predict(
+        self,
+        X: np.ndarray | None = None,
+        *,
+        aggregate: Literal['mean', 'median'] = 'mean',
+        return_std: Literal[False] = False,
+        **kwargs,
+    ) -> np.ndarray:
+        ...
+
+    @overload
+    def predict(
+        self,
+        X: np.ndarray | None = None,
+        *,
+        aggregate: Literal['mean', 'median'] = 'mean',
+        return_std: Literal[True] = True,
+        **kwargs,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        ...
+
     def predict(
         self,
         X: np.ndarray | None = None,
@@ -188,13 +210,13 @@ class ScoreBasedGenerator(BaseEstimator):
         samples = self.sample(X, **(kwargs | {'return_paths': False}))
 
         if return_std:
-            # (N, n_outputs) or (n_outputs,)
-            return agg_func(samples, axis=0).squeeze()  # type: ignore
-        else:
             return (
                 agg_func(samples, axis=0).squeeze(),
                 np.std(samples, axis=0).squeeze(),
             )  # type: ignore
+        else:
+            # (N, n_outputs) or (n_outputs,)
+            return agg_func(samples, axis=0).squeeze()  # type: ignore
 
     def _sample_langenvin_montecarlo(
         self,
