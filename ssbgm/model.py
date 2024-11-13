@@ -318,7 +318,11 @@ class ScoreBasedGenerator(BaseEstimator):
             # To avoid this, the large value is multiplied to pdf.
             use_pdf_as_domain_indicator=True,
             verbose=self.verbose,
-        ).reshape(n_steps, n_samples, -1, self.n_outputs_)
+        )
+        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_)
+        # NOTE: The order of (-1, n_samples) is based on np.repeat(X, n_samples, axis=0)  # noqa
+        paths = paths.transpose(0, 2, 1, 3)
+        # NOTE: transponse it because the structure of the output is easier to use when the shape is (n_steps, n_samples, N, n_outputs)  # noqa
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
         return paths if return_paths else paths[-1]
@@ -368,7 +372,11 @@ class ScoreBasedGenerator(BaseEstimator):
             t1=0,
             n_steps=n_steps,
             verbose=self.verbose,
-        )[1].reshape(n_steps, n_samples, N, self.n_outputs_)
+        )[1]
+        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_)
+        # NOTE: The order of (-1, n_samples) is based on np.repeat(X, n_samples, axis=0)  # noqa
+        paths = paths.transpose(0, 2, 1, 3)
+        # NOTE: transponse it because the structure of the output is easier to use when the shape is (n_steps, n_samples, N, n_outputs)  # noqa
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
         return paths if return_paths else paths[-1]
@@ -418,7 +426,11 @@ class ScoreBasedGenerator(BaseEstimator):
             t1=0,
             n_steps=n_steps,
             verbose=self.verbose,
-        )[1].reshape(n_steps, n_samples, N, self.n_outputs_)
+        )[1]
+        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_)
+        # NOTE: The order of (-1, n_samples) is based on np.repeat(X, n_samples, axis=0)  # noqa
+        paths = paths.transpose(0, 2, 1, 3)
+        # NOTE: transponse it because the structure of the output is easier to use when the shape is (n_steps, n_samples, N, n_outputs)  # noqa
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
         return paths if return_paths else paths[-1]
