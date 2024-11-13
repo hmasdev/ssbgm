@@ -468,10 +468,12 @@ class ScoreBasedGenerator(BaseEstimator):
                 return self._sample_langenvin_montecarlo(
                     X,
                     n_samples=n_samples,
+                    n_steps=n_steps,
                     alpha=alpha,
                     sigma=sigma,
                     init_sample=init_sample,
                     is_in_valid_domain_func=is_in_valid_domain_func,
+                    return_paths=return_paths,
                 )
             elif sampling_method == ScoreBasedGenerator.SamplingMethod.EULER:  # noqa
                 return self._sample_euler(X, n_samples=n_samples, n_steps=n_steps, return_paths=return_paths)  # noqa
