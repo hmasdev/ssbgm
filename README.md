@@ -63,7 +63,7 @@ generator.fit(X)
 
 # generate synthetic data
 # Langevin Monte Carlo is used to generate synthetic data
-X_syn_lmc = sbmgenerator2.sample(n_samples=128, sampling_method=sbmgenerator2.SamplingMethod.LANGEVIN_MONTECARLO, alpha=0.2, n_warmup=1000).squeeze()
+X_syn_lmc = sbmgenerator2.sample(n_samples=128, sampling_method=sbmgenerator2.SamplingMethod.LANGEVIN_MONTECARLO, alpha=0.2).squeeze()
 X_syn_euler = sbmgenerator2.sample(n_samples=128, sampling_method=sbmgenerator2.SamplingMethod.EULER).squeeze()
 X_syn_em = sbmgenerator2.sample(n_samples=128, sampling_method=sbmgenerator2.SamplingMethod.EULER_MARUYAMA).squeeze()
 # The shape of each X_syn_* is (128, X.shape[1])
@@ -143,14 +143,12 @@ plt.legend(loc='upper left')
 plt.show()
 ```
 
-    [LightGBM] [Info] Auto-choosing row-wise multi-threading, the overhead of testing was 0.002620 seconds.
-    You can set `force_row_wise=true` to remove the overhead.
-    And if memory is not enough, you can set `force_col_wise=true`.
-    [LightGBM] [Info] Total Bins 357
-    [LightGBM] [Info] Number of data points in the train set: 1010000, number of used features: 2
-    [LightGBM] [Info] Start training from score 0.000087
-
-    100%|██████████| 999/999 [00:07<00:00, 134.68it/s]
+   [LightGBM] [Info] Auto-choosing row-wise multi-threading, the overhead of testing was 0.004026 seconds.
+   You can set `force_row_wise=true` to remove the overhead.
+   And if memory is not enough, you can set `force_col_wise=true`.
+   [LightGBM] [Info] Total Bins 357
+   [LightGBM] [Info] Number of data points in the train set: 1010000, number of used features: 2
+   [LightGBM] [Info] Start training from score 0.000087
 
 ![./pics/1d_mixed_gaussian_distribution_example.png](./pics/1d_mixed_gaussian_distribution_example.png)
 
@@ -190,8 +188,6 @@ plt.xlim(X_train[:, 0].min(), X_train[:, 0].max())
 plt.ylim(X_train[:, 1].min(), X_train[:, 1].max())
 plt.show()
 ```
-
-    100%|██████████| 999/999 [00:18<00:00, 55.31it/s]
 
 ![./pics/2d_mixed_gaussian_distribution_example.png](./pics/2d_mixed_gaussian_distribution_example.png)
 
