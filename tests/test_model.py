@@ -511,3 +511,55 @@ def test_ScoreBasedGenerator_predict(
     else:
         assert mean_pred.shape == (X.shape[1],)
         assert std_pred.shape == (X.shape[1],)
+
+# TODO: test ScoreBasedGenerator.predict with conditions
+
+
+@pytest.mark.parametrize(
+    'X',
+    [
+        np.array([[1, 2], [3, 4], [5, 6], [10, 9]]),
+        np.array([[1], [2], [3]]),
+        np.array([1, 2, 3]),
+    ]
+)
+def test_ScoreBasedGenerator_predict_score(
+    X: np.ndarray,
+) -> None:
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.fit(X, noise_strengths=[1e-3, 1, 10])
+    score = sbm.predict_score(X)
+    if X.ndim == 1 or X.shape[1] == 1:
+        assert score.shape == X.shape[:1]
+    else:
+        assert score.shape == X.shape
+
+
+@pytest.mark.parametrize(
+    'X,y',
+    [
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([0, 1, 0]),
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([[1], [2], [3]]),
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+        )
+    ]
+)
+def test_ScoreBasedGenerator_predict_score_w_conditions(
+    X: np.ndarray,
+    y: np.ndarray,
+) -> None:
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.fit(X, y, noise_strengths=[1e-3, 1, 10])
+    score = sbm.predict_score(X, y)
+    if y.ndim == 1 or y.shape[1] == 1:
+        assert score.shape == y.shape[:1]
+    else:
+        assert score.shape == y.shape

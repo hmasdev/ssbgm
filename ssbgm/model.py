@@ -481,3 +481,48 @@ class ScoreBasedGenerator(BaseEstimator):
                 return self._sample_euler_maruyama(X, n_samples=n_samples, n_steps=n_steps, return_paths=return_paths)  # noqa
             else:
                 raise ValueError(f'Invalid sampling method: {sampling_method}')
+
+    def predict_score(
+        self,
+        X: np.ndarray,
+        y: np.ndarray | None = None,
+        sigma: int | float | np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Predict the score function of the target distribution.
+
+        Args:
+            X (np.ndarray): Generated data, or conditions if y is given. Shape: (N, M or n_outputs).
+            y (np.ndarray | None, optional): Generated data given X. Defaults to None. Shape: (N, n_outputs) if given.
+            sigma (int | float | np.ndarray | None, optional): noise strength. Defaults to None.
+                If sigma is None, sigma is automatically set to min(self.noise_strengths_).
+
+        Returns:
+            np.ndarray: score function of the target distribution.
+                shape is the same as the input X if y is not given. Otherwise, shape is the same as the input y.
+        """  # noqa
+
+        # validation
+        check_is_fitted(self, 'estimator_')
+
+        # preprocess X and y
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+
+        if y is None:
+            # if y is not given, model learns the score function of X
+            X = check_array(X, ensure_2d=False)  # type: ignore
+        else:
+            # if y is given, model learns the score function of y given X
+            X, y = check_X_y(X, y, multi_output=True)
+            assert y is not None
+            if y.ndim == 1:
+                y = y.reshape(-1, 1)
+
+        if sigma is None:
+            sigma = min(self.noise_strengths_)
+        if not isinstance(sigma, np.ndarray):
+            sigma = np.array([[sigma]]*len(X))
+
+        # predict the score function
+        X_ = np.hstack([X,]+([] if y is None else [y])+[sigma.reshape(-1, 1)])
+        return self.estimator_.predict(X_)  # type: ignore
