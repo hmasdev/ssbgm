@@ -352,14 +352,12 @@ class ScoreBasedGenerator(BaseEstimator):
         if X is None:
             # x: (n_samples, n_outputs)
             x0 = np.random.randn(n_samples, self.n_outputs_) * max(self.noise_strengths_)  # noqa
-            N = 1
 
             def f(x, t):
                 return - 0.5 * self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)  # noqa
         else:
             # x: (n_samples * N, n_outputs)
             x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
-            N = X.shape[0]
             X = np.repeat(X, n_samples, axis=0)
 
             def f(x, t):
@@ -405,14 +403,12 @@ class ScoreBasedGenerator(BaseEstimator):
         if X is None:
             # x: (n_samples, n_outputs)
             x0 = np.random.randn(n_samples, self.n_outputs_) * max(self.noise_strengths_)  # noqa
-            N = 1
 
             def f(x, t):
                 return - self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)  # noqa
         else:
             # x: (n_samples * N, n_outputs)
             x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
-            N = X.shape[0]
             X = np.repeat(X, n_samples, axis=0)
 
             def f(x, t):
