@@ -158,6 +158,51 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions(
         )
 
 
+def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions_with_conditioned_by() -> None:  # noqa
+
+    conditioned_by = {0: 3}
+
+    X = np.array([[1, 2], [3, 4], [5, 6]])
+    n_samples = DEFAULT_N_SAMPLES
+    alpha = 0.1
+    sigma = 1e-4
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.fit(X)
+    samples = sbm._sample_langenvin_montecarlo(
+        n_samples=n_samples,
+        alpha=alpha,
+        sigma=sigma,
+        conditioned_by=conditioned_by,
+    )
+    assert samples.shape == (n_samples, 1, X.shape[1] if X.ndim > 1 else 1)
+    assert np.all(samples[:, 0, 0] == conditioned_by[0])  # Check if the first column is conditioned by the value of conditioned_by  # noqa
+
+
+@pytest.mark.parametrize(
+    'conditioned_by',
+    [
+        {0: 1, 1: 2},
+        {3: 2},
+    ]
+)
+def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions_with_invalid_conditioned_by(  # noqa
+    conditioned_by: dict[int, int]
+) -> None:
+    X = np.array([[1, 2], [3, 4], [5, 6]])
+    n_samples = DEFAULT_N_SAMPLES
+    alpha = 0.1
+    sigma = 1e-4
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.fit(X)
+    with pytest.raises(AssertionError):
+        sbm._sample_langenvin_montecarlo(
+            n_samples=n_samples,
+            alpha=alpha,
+            sigma=sigma,
+            conditioned_by=conditioned_by,
+        )
+
+
 def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions_with_domain_specified() -> None:  # noqa
 
     minx0 = 1.5
@@ -257,6 +302,41 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_w_conditions(
 
 
 @pytest.mark.parametrize(
+    'conditioned_by',
+    [
+        {0: 1},
+        {0: np.array([1, 2, 3])},
+    ]
+)
+def test_ScoreBasedGenerator__sample_langevin_montecarlo_w_conditions_with_conditioned_by(  # noqa
+    conditioned_by: dict[int, int | np.ndarray]
+) -> None:
+
+    X = np.array([[1, 2], [3, 4], [5, 6]])
+    y = np.array([[1, 2], [3, 4], [5, 6]])
+    n_samples = DEFAULT_N_SAMPLES
+    alpha = 0.1
+    sigma = 1e-4
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.fit(X, y)
+    samples = sbm._sample_langenvin_montecarlo(
+        X,
+        n_samples=n_samples,
+        alpha=alpha,
+        sigma=sigma,
+        conditioned_by=conditioned_by,
+    )
+    assert samples.shape == (n_samples, X.shape[0], X.shape[1] if X.ndim > 1 else 1)  # noqa
+    for k, v in conditioned_by.items():
+        # Check if the first column is conditioned by the value of conditioned_by  # noqa
+        if isinstance(v, np.ndarray):
+            for n in range(n_samples):
+                assert np.all(samples[n, :, k] == v)
+        else:
+            assert np.all(samples[:, :, k] == v)
+
+
+@pytest.mark.parametrize(
     'X,init_sample',
     [
         (X, init_sample)
@@ -307,6 +387,50 @@ def test_ScoreBasedGenerator__sample_euler_wo_conditions(
             X,
             n_samples=n_samples,
             n_steps=n_steps,
+        )
+
+
+def test_ScoreBasedGenerator__sample_euler_wo_conditions_with_conditioned_by() -> None:  # noqa
+
+    conditioned_by = {0: 3}
+
+    X = np.array([[1, 2], [3, 4], [5, 6]])
+    n_samples = DEFAULT_N_SAMPLES
+    n_steps = 101
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.fit(X)
+
+    samples = sbm._sample_euler(
+        n_samples=n_samples,
+        n_steps=n_steps,
+        conditioned_by=conditioned_by,
+    )
+    assert samples.shape == (n_samples, 1, X.shape[1] if X.ndim > 1 else 1)
+    assert np.all(samples[:, 0, 0] == conditioned_by[0])  # Check if the first column is conditioned by the value of conditioned_by  # noqa
+
+
+@pytest.mark.parametrize(
+    'conditioned_by',
+    [
+        {0: 1, 1: 2},
+        {3: 2},
+    ]
+)
+def test_ScoreBasedGenerator__sample_euler_wo_conditions_with_invalid_conditioned_by(  # noqa
+    conditioned_by: dict[int, int]
+) -> None:
+
+    X = np.array([[1, 2], [3, 4], [5, 6]])
+    n_samples = DEFAULT_N_SAMPLES
+    n_steps = 101
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.fit(X)
+
+    with pytest.raises(AssertionError):
+        sbm._sample_euler(
+            n_samples=n_samples,
+            n_steps=n_steps,
+            conditioned_by=conditioned_by,
         )
 
 
@@ -375,6 +499,42 @@ def test_ScoreBasedGenerator__sample_euler_w_conditions(
 
 
 @pytest.mark.parametrize(
+    'conditioned_by',
+    [
+        {0: 1},
+        {0: np.array([1, 2, 3])},
+    ]
+)
+def test_ScoreBasedGenerator__sample_euler_w_conditions_with_conditioned_by(
+    conditioned_by: dict[int, int | np.ndarray]
+) -> None:
+
+    conditioned_by = {0: 3}
+
+    X = np.array([[1, 2], [3, 4], [5, 6]])
+    y = np.array([[1, 2], [3, 4], [5, 6]])
+
+    n_samples = DEFAULT_N_SAMPLES
+    n_steps = 101
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.fit(X, y)
+
+    samples = sbm._sample_euler(
+        X,
+        n_samples=n_samples,
+        n_steps=n_steps,
+        conditioned_by=conditioned_by,
+    )
+    assert samples.shape == (n_samples, X.shape[0], 1 if y.ndim == 1 else y.shape[1])  # noqa
+    for k, v in conditioned_by.items():
+        if isinstance(v, np.ndarray):
+            for n in range(n_samples):
+                assert np.all(samples[n, :, k] == v)
+        else:
+            assert np.all(samples[:, :, k] == v)
+
+
+@pytest.mark.parametrize(
     'X,init_sample',
     [
         (X, init_sample)
@@ -425,6 +585,50 @@ def test_ScoreBasedGenerator__sample_euler_maruyama_wo_conditions(
             X,
             n_samples=n_samples,
             n_steps=n_steps,
+        )
+
+
+def test_ScoreBasedGenerator__sample_euler_maruyama_wo_conditions_with_conditioned_by() -> None:  # noqa
+
+    conditioned_by = {0: 3}
+
+    X = np.array([[1, 2], [3, 4], [5, 6]])
+    n_samples = DEFAULT_N_SAMPLES
+    n_steps = 101
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.fit(X)
+
+    samples = sbm._sample_euler_maruyama(
+        n_samples=n_samples,
+        n_steps=n_steps,
+        conditioned_by=conditioned_by,
+    )
+    assert samples.shape == (n_samples, 1, X.shape[1] if X.ndim > 1 else 1)
+    assert np.all(samples[:, 0, 0] == conditioned_by[0])  # Check if the first column is conditioned by the value of conditioned_by  # noqa
+
+
+@pytest.mark.parametrize(
+    'conditioned_by',
+    [
+        {0: 1, 1: 2},
+        {3: 2},
+    ]
+)
+def test_ScoreBasedGenerator__sample_euler_maruyama_wo_conditions_with_invalid_conditioned_by(  # noqa
+    conditioned_by: dict[int, int]
+) -> None:
+
+    X = np.array([[1, 2], [3, 4], [5, 6]])
+    n_samples = DEFAULT_N_SAMPLES
+    n_steps = 101
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.fit(X)
+
+    with pytest.raises(AssertionError):
+        sbm._sample_euler_maruyama(
+            n_samples=n_samples,
+            n_steps=n_steps,
+            conditioned_by=conditioned_by,
         )
 
 
@@ -488,6 +692,40 @@ def test_ScoreBasedGenerator__sample_euler_maruyama_w_conditions(
             n_samples=n_samples,
             n_steps=n_steps,
         )
+
+
+@pytest.mark.parametrize(
+    'conditioned_by',
+    [
+        {0: 1},
+        {0: np.array([1, 2, 3])},
+    ]
+)
+def test_ScoreBasedGenerator__sample_euler_maruyama_w_conditions_with_conditioned_by(  # noqa
+    conditioned_by: dict[int, int | np.ndarray]
+) -> None:
+
+    X = np.array([[1, 2], [3, 4], [5, 6]])
+    y = np.array([[1, 2], [3, 4], [5, 6]])
+
+    n_samples = DEFAULT_N_SAMPLES
+    n_steps = 101
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.fit(X, y)
+
+    samples = sbm._sample_euler_maruyama(
+        X,
+        n_samples=n_samples,
+        n_steps=n_steps,
+        conditioned_by=conditioned_by,
+    )
+    assert samples.shape == (n_samples, X.shape[0], 1 if y.ndim == 1 else y.shape[1])  # noqa
+    for k, v in conditioned_by.items():
+        if isinstance(v, np.ndarray):
+            for n in range(n_samples):
+                assert np.all(samples[n, :, k] == v)
+        else:
+            assert np.all(samples[:, :, k] == v)
 
 
 @pytest.mark.parametrize(
