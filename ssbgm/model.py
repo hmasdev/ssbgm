@@ -339,6 +339,7 @@ class ScoreBasedGenerator(BaseEstimator):
         *,
         n_samples: int = 1000,
         n_steps: int = 1000,
+        init_sample: np.ndarray | None = None,
         return_paths: bool = False,
     ) -> np.ndarray:
         """Generate samples from the Euler method.
@@ -348,6 +349,9 @@ class ScoreBasedGenerator(BaseEstimator):
                 Shape: (N, M) if it is not None.
             n_samples (int, optional): number of samples. Defaults to 1000.
             n_steps (int, optional): number of steps. Defaults to 1000.
+            init_sample (np.ndarray | None, optional): initial sample. Defaults to None.
+                (n_outputs,) shape array if it is not None.
+                NOTE: n_samples should be 1 if init_sample is not None because the same sample paths are generated.
             return_paths (bool, optional): flag to return paths. Defaults to False.
 
         Returns:
@@ -357,13 +361,19 @@ class ScoreBasedGenerator(BaseEstimator):
         """  # noqa
         if X is None:
             # x: (n_samples, n_outputs)
-            x0 = np.random.randn(n_samples, self.n_outputs_) * max(self.noise_strengths_)  # noqa
+            if init_sample is not None:
+                x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*n_samples)  # noqa
+            else:
+                x0 = np.random.randn(n_samples, self.n_outputs_) * max(self.noise_strengths_)  # noqa
 
             def f(x, t):
                 return - 0.5 * self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)  # noqa
         else:
             # x: (n_samples * N, n_outputs)
-            x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
+            if init_sample is not None:
+                x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*X.shape[0]*n_samples)  # noqa
+            else:
+                x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
             X = np.repeat(X, n_samples, axis=0)
 
             def f(x, t):
@@ -391,6 +401,7 @@ class ScoreBasedGenerator(BaseEstimator):
         *,
         n_samples: int = 1000,
         n_steps: int = 1000,
+        init_sample: np.ndarray | None = None,
         return_paths: bool = False,
     ) -> np.ndarray:
         """Generate samples from the Euler-Maruyama method.
@@ -399,6 +410,9 @@ class ScoreBasedGenerator(BaseEstimator):
             X (np.ndarray | None, optional): conditions. Defaults to None.
             n_samples (int, optional): number of samples. Defaults to 1000.
             n_steps (int, optional): number of steps. Defaults to 1000.
+            init_sample (np.ndarray | None, optional): initial sample. Defaults to None.
+                (n_outputs,) shape array if it is not None.
+                NOTE: n_samples should be 1 if init_sample is not None because the same sample paths are generated.
             return_paths (bool, optional): flag to return paths. Defaults to False.
 
         Returns:
@@ -408,13 +422,19 @@ class ScoreBasedGenerator(BaseEstimator):
         """  # noqa
         if X is None:
             # x: (n_samples, n_outputs)
-            x0 = np.random.randn(n_samples, self.n_outputs_) * max(self.noise_strengths_)  # noqa
+            if init_sample is not None:
+                x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*n_samples)  # noqa
+            else:
+                x0 = np.random.randn(n_samples, self.n_outputs_) * max(self.noise_strengths_)  # noqa
 
             def f(x, t):
                 return - self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)  # noqa
         else:
             # x: (n_samples * N, n_outputs)
-            x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
+            if init_sample is not None:
+                x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*X.shape[0]*n_samples)  # noqa
+            else:
+                x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
             X = np.repeat(X, n_samples, axis=0)
 
             def f(x, t):
@@ -445,9 +465,9 @@ class ScoreBasedGenerator(BaseEstimator):
         sampling_method: SamplingMethod = SamplingMethod.LANGEVIN_MONTECARLO,
         n_steps: int = 1000,
         return_paths: bool = False,
+        init_sample: np.ndarray | None = None,
         alpha: float = 0.1,  # only for langevin monte carlo
         sigma: float | None = None,  # only for langevin monte carlo
-        init_sample: np.ndarray | None = None,  # only for langevin monte carlo
         is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,  # only for langevin monte carlo # noqa
         seed: int | None = None,
     ) -> np.ndarray:
@@ -459,10 +479,10 @@ class ScoreBasedGenerator(BaseEstimator):
             sampling_method (SamplingMethod, optional): sampling method. Defaults to SamplingMethod.LANGEVIN_MONTECARLO.
             n_steps (int, optional): number of steps. Defaults to 1000.
             return_paths (bool, optional): flag to return paths. Defaults to False.
+            init_sample (np.ndarray | None, optional): initial sample. Defaults to None. (n_outputs,) shape array if it is not None.  (NOTE: only for langevin monte carlo)
 
             alpha (float, optional): time step size of the Langevin Monte Carlo algorithm. Defaults to 0.1. (NOTE: only for langevin monte carlo)
             sigma (float | None, optional): noise strength. Defaults to None. (NOTE: only for langevin monte carlo)
-            init_sample (np.ndarray | None, optional): initial sample. Defaults to None. (n_outputs,) shape array if it is not None.  (NOTE: only for langevin monte carlo)
             is_in_valid_domain_func (Callable[[np.ndarray], bool] | None, optional): function to check whether the sample is in the valid domain. Defaults to None. (NOTE: only for langevin monte carlo)
                 When is_in_valid_domain_func is given, _sample_langenvin_montecarlo draws samples with Metropolis-adjusted Langevin algorithm in stead of Langevin Monte Carlo algorithm.
 
@@ -490,9 +510,21 @@ class ScoreBasedGenerator(BaseEstimator):
                     return_paths=return_paths,
                 )
             elif sampling_method == ScoreBasedGenerator.SamplingMethod.EULER:  # noqa
-                return self._sample_euler(X, n_samples=n_samples, n_steps=n_steps, return_paths=return_paths)  # noqa
+                return self._sample_euler(
+                    X,
+                    n_samples=n_samples,
+                    n_steps=n_steps,
+                    init_sample=init_sample,
+                    return_paths=return_paths,
+                )
             elif sampling_method == ScoreBasedGenerator.SamplingMethod.EULER_MARUYAMA:  # noqa
-                return self._sample_euler_maruyama(X, n_samples=n_samples, n_steps=n_steps, return_paths=return_paths)  # noqa
+                return self._sample_euler_maruyama(
+                    X,
+                    n_samples=n_samples,
+                    n_steps=n_steps,
+                    init_sample=init_sample,
+                    return_paths=return_paths,
+                )
             else:
                 raise ValueError(f'Invalid sampling method: {sampling_method}')
 
