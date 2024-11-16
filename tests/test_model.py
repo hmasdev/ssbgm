@@ -9,6 +9,8 @@ from ssbgm.model import (
 
 # TODO: test whether calling ScoreBasedGenerator.sample raises NotFittedError when ScoreBasedGenerator is not fitted  # noqa
 
+DEFAULT_N_SAMPLES = 64
+
 
 @pytest.mark.parametrize(
     'X, sigmas, expected_shapes',
@@ -110,27 +112,41 @@ def test_ScoreBasedGenerator_fit(
 
 
 @pytest.mark.parametrize(
-    'sigma',
-    (
-        None,
-        0.1,
-        [0.1, 0.2],
-    )
+    'X,init_sample,sigma',
+    [
+        (X, init_sample, sigma)
+        for X, init_sample, sigma in product(
+            [
+                np.array([1, 2, 3]),
+                np.array([[1], [2], [3]]),
+                np.array([[1, 2], [3, 4], [5, 6]]),
+            ],
+            [None, np.array([1]), np.array([1, 2])],
+            [None, 0.1, [0.1, 0.2]],
+        )
+        if (
+            (init_sample is None)
+            or (X.ndim == 1 and len(init_sample) == 1)
+            or (X.ndim > 1 and X.shape[1] == len(init_sample))
+        )
+    ]
 )
 def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions(
-    sigma: float | list[float] | None,
-) -> None:
-    n_samples = 128
+    X: np.ndarray,
+    init_sample: np.ndarray | None,
+    sigma: float | None
+) -> None:  # noqa
+    n_samples = DEFAULT_N_SAMPLES
     alpha = 0.1
-    X = np.array([[1, 2], [3, 4], [5, 6]])
     sbm = ScoreBasedGenerator(estimator=LinearRegression())
     sbm.fit(X)
     samples = sbm._sample_langenvin_montecarlo(
         n_samples=n_samples,
         alpha=alpha,
+        init_sample=init_sample,
         sigma=sigma,
     )
-    assert samples.shape == (n_samples, 1, X.shape[1])
+    assert samples.shape == (n_samples, 1, X.shape[1] if X.ndim > 1 else 1)
 
     # Without conditions, giving X to sample method raises an error
     with pytest.raises(Exception):
@@ -150,7 +166,7 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions_with_doma
     maxx1 = 5.5
 
     n_steps = 101
-    n_samples = 64
+    n_samples = DEFAULT_N_SAMPLES
     alpha = 0.1
     X = np.array([[1, 2], [3, 4], [5, 6]])
     sbm = ScoreBasedGenerator(estimator=LinearRegression(), verbose=True)
@@ -186,23 +202,39 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions_with_doma
 
 
 @pytest.mark.parametrize(
-    'X,y',
+    'X,y,init_sample,sigma',
     [
-        (
-            np.array([[1, 2], [3, 4], [5, 6]]),
-            np.array([0, 1, 0]),
-        ),
-        (
-            np.array([[1, 2], [3, 4], [5, 6]]),
-            np.array([[1, 2], [3, 4], [5, 6]]),
+        (X, y, init_sample, sigma)
+        for (X, y), init_sample, sigma in product(
+            [
+                (
+                    np.array([[1, 2], [3, 4], [5, 6]]),
+                    np.array([0, 1, 0]),
+                ),
+                (
+                    np.array([[1, 2], [3, 4], [5, 6]]),
+                    np.array([[1, 2], [3, 4], [5, 6]]),
+                )
+            ],
+            [None, np.array([1]), np.array([1, 2])],
+            [None, 0.1, [0.1, 0.2]],
         )
+        if (
+            (init_sample is None)
+            or (y.ndim == 1 and len(init_sample) == 1)
+            or (y.ndim > 1 and y.shape[1] == len(init_sample))
+        )
+    ] + [
+
     ]
 )
 def test_ScoreBasedGenerator__sample_langevin_montecarlo_w_conditions(
     X: np.ndarray,
     y: np.ndarray,
+    init_sample: np.ndarray | None,
+    sigma: float | None
 ) -> None:
-    n_samples = 128
+    n_samples = DEFAULT_N_SAMPLES
     alpha = 0.1
     sbm = ScoreBasedGenerator(estimator=LinearRegression())
     sbm.fit(X, y)
@@ -210,6 +242,8 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_w_conditions(
         X,
         n_samples=n_samples,
         alpha=alpha,
+        init_sample=init_sample,
+        sigma=sigma,
     )
     assert samples.shape == (n_samples, X.shape[0], 1 if y.ndim == 1 else y.shape[1])  # noqa
 
@@ -222,10 +256,31 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_w_conditions(
         )
 
 
-def test_ScoreBasedGenerator__sample_euler_wo_conditions() -> None:
-    n_samples = 128
+@pytest.mark.parametrize(
+    'X,init_sample',
+    [
+        (X, init_sample)
+        for X, init_sample in product(
+            [
+                np.array([1, 2, 3]),
+                np.array([[1], [2], [3]]),
+                np.array([[1, 2], [3, 4], [5, 6]]),
+            ],
+            [None, np.array([1]), np.array([1, 2])],
+        )
+        if (
+            (init_sample is None)
+            or (X.ndim == 1 and len(init_sample) == 1)
+            or (X.ndim > 1 and X.shape[1] == len(init_sample))
+        )
+    ]
+)
+def test_ScoreBasedGenerator__sample_euler_wo_conditions(
+    X: np.ndarray,
+    init_sample: np.ndarray | None,
+) -> None:
+    n_samples = DEFAULT_N_SAMPLES
     n_steps = 101
-    X = np.array([[1, 2], [3, 4], [5, 6]])
     sbm = ScoreBasedGenerator(estimator=LinearRegression())
     sbm.fit(X)
 
@@ -233,8 +288,9 @@ def test_ScoreBasedGenerator__sample_euler_wo_conditions() -> None:
     samples = sbm._sample_euler(
         n_samples=n_samples,
         n_steps=n_steps,
+        init_sample=init_sample,
     )
-    assert samples.shape == (n_samples, 1, X.shape[1])
+    assert samples.shape == (n_samples, 1, X.shape[1] if X.ndim > 1 else 1)
 
     # return_paths=True
     samples = sbm._sample_euler(
@@ -242,7 +298,7 @@ def test_ScoreBasedGenerator__sample_euler_wo_conditions() -> None:
         n_steps=n_steps,
         return_paths=True,
     )
-    assert samples.shape == (n_steps, n_samples, 1, X.shape[1])
+    assert samples.shape == (n_steps, n_samples, 1, X.shape[1] if X.ndim > 1 else 1)  # noqa
 
     # Without conditions, giving X to sample method raises an error
     with pytest.raises(Exception):
@@ -255,23 +311,36 @@ def test_ScoreBasedGenerator__sample_euler_wo_conditions() -> None:
 
 
 @pytest.mark.parametrize(
-    'X,y',
+    'X,y,init_sample',
     [
         (
             np.array([[1, 2], [3, 4], [5, 6]]),
             np.array([0, 1, 0]),
+            np.array([1]),
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([0, 1, 0]),
+            None,
         ),
         (
             np.array([[1, 2], [3, 4], [5, 6]]),
             np.array([[1, 2], [3, 4], [5, 6]]),
-        )
+            np.array([1, 2]),
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            None,
+        ),
     ]
 )
 def test_ScoreBasedGenerator__sample_euler_w_conditions(
     X: np.ndarray,
     y: np.ndarray,
+    init_sample: np.ndarray | None,
 ) -> None:
-    n_samples = 128
+    n_samples = DEFAULT_N_SAMPLES
     n_steps = 101
     sbm = ScoreBasedGenerator(estimator=LinearRegression())
     sbm.fit(X, y)
@@ -281,6 +350,7 @@ def test_ScoreBasedGenerator__sample_euler_w_conditions(
         X,
         n_samples=n_samples,
         n_steps=n_steps,
+        init_sample=init_sample,
     )
     assert samples.shape == (n_samples, X.shape[0], 1 if y.ndim == 1 else y.shape[1])  # noqa
 
@@ -289,6 +359,7 @@ def test_ScoreBasedGenerator__sample_euler_w_conditions(
         X,
         n_samples=n_samples,
         n_steps=n_steps,
+        init_sample=init_sample,
         return_paths=True,
     )
     assert samples.shape == (n_steps, n_samples, X.shape[0], 1 if y.ndim == 1 else y.shape[1])  # noqa
@@ -303,10 +374,31 @@ def test_ScoreBasedGenerator__sample_euler_w_conditions(
         )
 
 
-def test_ScoreBasedGenerator__sample_euler_maruyama_wo_conditions() -> None:
-    n_samples = 128
+@pytest.mark.parametrize(
+    'X,init_sample',
+    [
+        (X, init_sample)
+        for X, init_sample in product(
+            [
+                np.array([1, 2, 3]),
+                np.array([[1], [2], [3]]),
+                np.array([[1, 2], [3, 4], [5, 6]]),
+            ],
+            [None, np.array([1]), np.array([1, 2])],
+        )
+        if (
+            (init_sample is None)
+            or (X.ndim == 1 and len(init_sample) == 1)
+            or (X.ndim > 1 and X.shape[1] == len(init_sample))
+        )
+    ]
+)
+def test_ScoreBasedGenerator__sample_euler_maruyama_wo_conditions(
+    X: np.ndarray,
+    init_sample: np.ndarray | None,
+) -> None:
+    n_samples = DEFAULT_N_SAMPLES
     n_steps = 101
-    X = np.array([[1, 2], [3, 4], [5, 6]])
     sbm = ScoreBasedGenerator(estimator=LinearRegression())
     sbm.fit(X)
 
@@ -314,16 +406,18 @@ def test_ScoreBasedGenerator__sample_euler_maruyama_wo_conditions() -> None:
     samples = sbm._sample_euler_maruyama(
         n_samples=n_samples,
         n_steps=n_steps,
+        init_sample=init_sample,
     )
-    assert samples.shape == (n_samples, 1, X.shape[1])
+    assert samples.shape == (n_samples, 1, X.shape[1] if X.ndim > 1 else 1)
 
     # return_paths=True
     samples = sbm._sample_euler_maruyama(
         n_samples=n_samples,
         n_steps=n_steps,
+        init_sample=init_sample,
         return_paths=True,
     )
-    assert samples.shape == (n_steps, n_samples, 1, X.shape[1])
+    assert samples.shape == (n_steps, n_samples, 1, X.shape[1] if X.ndim > 1 else 1)  # noqa
 
     # Without conditions, giving X to sample method raises an error
     with pytest.raises(Exception):
@@ -335,23 +429,36 @@ def test_ScoreBasedGenerator__sample_euler_maruyama_wo_conditions() -> None:
 
 
 @pytest.mark.parametrize(
-    'X,y',
+    'X,y,init_sample',
     [
         (
             np.array([[1, 2], [3, 4], [5, 6]]),
             np.array([0, 1, 0]),
+            np.array([1]),
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([0, 1, 0]),
+            None,
         ),
         (
             np.array([[1, 2], [3, 4], [5, 6]]),
             np.array([[1, 2], [3, 4], [5, 6]]),
-        )
+            np.array([1, 2]),
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            None,
+        ),
     ]
 )
 def test_ScoreBasedGenerator__sample_euler_maruyama_w_conditions(
     X: np.ndarray,
     y: np.ndarray,
+    init_sample: np.ndarray | None
 ) -> None:
-    n_samples = 128
+    n_samples = DEFAULT_N_SAMPLES
     n_steps = 101
     sbm = ScoreBasedGenerator(estimator=LinearRegression())
     sbm.fit(X, y)
@@ -361,6 +468,7 @@ def test_ScoreBasedGenerator__sample_euler_maruyama_w_conditions(
         X,
         n_samples=n_samples,
         n_steps=n_steps,
+        init_sample=init_sample,
     )
     assert samples.shape == (n_samples, X.shape[0], 1 if y.ndim == 1 else y.shape[1])  # noqa
 
@@ -369,6 +477,7 @@ def test_ScoreBasedGenerator__sample_euler_maruyama_w_conditions(
         X,
         n_samples=n_samples,
         n_steps=n_steps,
+        init_sample=init_sample,
         return_paths=True,
     )
     assert samples.shape == (n_steps, n_samples, X.shape[0], 1 if y.ndim == 1 else y.shape[1])  # noqa
@@ -422,7 +531,7 @@ def test_sample_wo_conditions(
         kwargs = kwargs.copy()  # NOTE: kwargs is shared among parameters
         kwargs['init_sample'] = np.arange(1 if X.ndim == 1 else X.shape[1])  # type: ignore # noqa
 
-    n_samples = 128
+    n_samples = DEFAULT_N_SAMPLES
     sbm = ScoreBasedGenerator(estimator=LinearRegression())
     sbm.fit(X)
     samples = sbm.sample(sampling_method=sample_method, n_samples=n_samples, **kwargs)  # type: ignore # noqa
@@ -479,7 +588,7 @@ def test_sample_w_conditions(
         kwargs = kwargs.copy()
         kwargs['init_sample'] = np.arange(1 if y.ndim == 1 else y.shape[1])  # type: ignore # noqa
 
-    n_samples = 128
+    n_samples = DEFAULT_N_SAMPLES
     sbm = ScoreBasedGenerator(estimator=LinearRegression())
     sbm.fit(X, y)
     samples = sbm.sample(X, sampling_method=sample_method, n_samples=n_samples, **kwargs)  # type: ignore # noqa
