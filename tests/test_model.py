@@ -109,7 +109,17 @@ def test_ScoreBasedGenerator_fit(
     ssg.fit(X, y)
 
 
-def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions() -> None:  # noqa
+@pytest.mark.parametrize(
+    'sigma',
+    (
+        None,
+        0.1,
+        [0.1, 0.2],
+    )
+)
+def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions(
+    sigma: float | list[float] | None,
+) -> None:
     n_samples = 128
     alpha = 0.1
     X = np.array([[1, 2], [3, 4], [5, 6]])
@@ -118,6 +128,7 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions() -> None
     samples = sbm._sample_langenvin_montecarlo(
         n_samples=n_samples,
         alpha=alpha,
+        sigma=sigma,
     )
     assert samples.shape == (n_samples, 1, X.shape[1])
 

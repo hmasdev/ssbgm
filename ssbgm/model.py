@@ -226,7 +226,7 @@ class ScoreBasedGenerator(BaseEstimator):
         n_samples: int = 1000,
         n_steps: int = 1000,
         alpha: float = 0.1,
-        sigma: float | None = None,
+        sigma: Iterable[float] | float | None = None,
         return_paths: bool = False,
         is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,
     ) -> np.ndarray:
@@ -280,8 +280,14 @@ class ScoreBasedGenerator(BaseEstimator):
             def dU(x, sigma):
                 return - self.estimator_.predict(np.hstack([X, x, np.array([[sigma]]*len(x))])).reshape(*x.shape)  # noqa
 
-        if sigma is None:
-            for sigma in sorted(self.noise_strengths_)[::-1]:
+        if isinstance(sigma, (bool, int, float)):
+            sigmas = None
+        elif sigma is None:
+            sigmas = sorted(self.noise_strengths_)[::-1]
+        else:
+            sigmas = sorted(sigma)[::-1]
+        if sigmas is not None:
+            for sigma in sigmas:
                 # NOTE: decrease the noise strength step by step
                 x0 = langevin_montecarlo(
                     x0=x0,
