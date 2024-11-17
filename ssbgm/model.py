@@ -1,6 +1,6 @@
 from enum import Enum
 from functools import partial
-from typing import Callable, Iterable, Literal, overload, TypeVar
+from typing import Callable, Iterable, Literal, Mapping, overload, TypeVar
 import numpy as np
 import sklearn
 from sklearn.base import (
@@ -218,6 +218,38 @@ class ScoreBasedGenerator(BaseEstimator):
             # (N, n_outputs) or (n_outputs,)
             return agg_func(samples, axis=0).squeeze()  # type: ignore
 
+    @overload
+    def _sample_langenvin_montecarlo(
+        self,
+        X: np.ndarray,
+        *,
+        init_sample: np.ndarray | None = None,
+        n_samples: int = 1000,
+        n_steps: int = 1000,
+        alpha: float = 0.1,
+        sigma: Iterable[float] | float | None = None,
+        return_paths: bool = False,
+        conditioned_by: Mapping[int, bool | int | float | np.ndarray] = {},
+        is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,
+    ) -> np.ndarray:
+        ...
+
+    @overload
+    def _sample_langenvin_montecarlo(
+        self,
+        X: None = None,
+        *,
+        init_sample: np.ndarray | None = None,
+        n_samples: int = 1000,
+        n_steps: int = 1000,
+        alpha: float = 0.1,
+        sigma: Iterable[float] | float | None = None,
+        return_paths: bool = False,
+        conditioned_by: Mapping[int, bool | int | float] = {},
+        is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,
+    ) -> np.ndarray:
+        ...
+
     def _sample_langenvin_montecarlo(
         self,
         X: np.ndarray | None = None,
@@ -228,6 +260,7 @@ class ScoreBasedGenerator(BaseEstimator):
         alpha: float = 0.1,
         sigma: Iterable[float] | float | None = None,
         return_paths: bool = False,
+        conditioned_by: Mapping[int, bool | int | float | np.ndarray] = {},
         is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,
     ) -> np.ndarray:
         """Generate samples from the Langevin Monte Carlo algorithm.
@@ -242,6 +275,13 @@ class ScoreBasedGenerator(BaseEstimator):
             alpha (float, optional): time step size of the Langevin Monte Carlo algorithm. Defaults to 0.1.
             sigma (float | None, optional): noise strength. Defaults to None.
             return_paths (bool, optional): flag to return paths. Defaults to False.
+            conditioned_by (Mapping[int, bool | int | float | np.ndarray], optional): conditions. Defaults to {}.
+                The key is the index of the output betwee 0 and n_outputs-1.
+                The type of value is bool, int, float, or np.ndarray.
+                When the value is bool, int or float, all output samples are conditioned by the value.
+                When X is None, the value cannot be np.ndarray.
+                When X is not None, the value can be np.ndarray, and then the shape of the value must be (X.shape[0],).
+                If the value is np.ndarray, each output samples are conditioned by the corresponding value.
             is_in_valid_domain_func (Callable[[np.ndarray], bool] | None, optional): function to check whether the sample is in the valid domain. Defaults to None.
                 When is_in_valid_domain_func is given, _sample_langenvin_montecarlo draws samples with Metropolis-adjusted Langevin algorithm in stead of Langevin Monte Carlo algorithm.
 
@@ -254,6 +294,14 @@ class ScoreBasedGenerator(BaseEstimator):
         # validation
         if init_sample is not None:
             assert init_sample.ndim == 1 and init_sample.size == self.n_outputs_, f'init_sample must be (n_outputs,) shape array. But init_sample.shape = {init_sample.shape}'  # noqa
+        if X is None:
+            assert all([not isinstance(v, np.ndarray) for v in conditioned_by.values()]), f'conditioned_by must be Mapping[int, bool | int | float]. But conditioned_by = {conditioned_by}'  # noqa
+        else:
+            assert all([v.shape == (X.shape[0],) for v in conditioned_by.values() if isinstance(v, np.ndarray)]), f'the shape of a np.ndarray value of conditioned_by must be (X.shape[0],). But conditioned_by = {conditioned_by}'  # noqa
+        assert len(conditioned_by) < self.n_outputs_, f'conditioned_by must be less than n_outputs. But len(conditioned_by) >= {len(conditioned_by)}'  # noqa
+        assert all([0 <= k < self.n_outputs_ for k in conditioned_by.keys()]), f'the key of conditioned_by must be between 0 and n_outputs-1. But conditioned_by.keys() = {conditioned_by.keys()}'  # noqa
+
+        _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
 
         if X is None:
             # x: (n_samples, n_outputs)
@@ -262,8 +310,20 @@ class ScoreBasedGenerator(BaseEstimator):
             else:
                 x0 = np.random.randn(n_samples, self.n_outputs_) * max(self.noise_strengths_)  # noqa
 
+            conditioned_by_processed = {
+                k: np.array([[v]]*n_samples)
+                for k, v in conditioned_by.items()
+            }
+
             def dU(x, sigma):
-                return - self.estimator_.predict(np.hstack([x, np.array([[sigma]]*len(x))])).reshape(*x.shape)  # noqa
+                if conditioned_by_processed:
+                    x = np.hstack([
+                        conditioned_by_processed[c]
+                        if c in conditioned_by_processed else
+                        x[:, _col2idx[c]][:, np.newaxis]
+                        for c in range(self.n_outputs_)
+                    ])
+                return - self.estimator_.predict(np.hstack([x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
         else:
             # x: (n_samples * N, n_outputs)
             if init_sample is not None:
@@ -275,10 +335,29 @@ class ScoreBasedGenerator(BaseEstimator):
             else:
                 x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
 
+            conditioned_by_processed = {
+                k: (
+                    np.repeat(v, n_samples, axis=0)[:, np.newaxis]
+                    if isinstance(v, np.ndarray) else
+                    np.array([[v]]*X.shape[0]*n_samples)
+                )
+                for k, v in conditioned_by.items()
+            }
+
             X = np.repeat(X, n_samples, axis=0)
 
             def dU(x, sigma):
-                return - self.estimator_.predict(np.hstack([X, x, np.array([[sigma]]*len(x))])).reshape(*x.shape)  # noqa
+                if conditioned_by_processed:
+                    x = np.hstack([
+                        conditioned_by_processed[c]
+                        if c in conditioned_by_processed else
+                        x[:, _col2idx[c]][:, np.newaxis]
+                        for c in range(self.n_outputs_)
+                    ])
+                return - self.estimator_.predict(np.hstack([X, x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
+
+        if conditioned_by:
+            x0 = x0[:, [i for i in range(self.n_outputs_) if i not in conditioned_by.keys()]]  # noqa
 
         if isinstance(sigma, (bool, int, float)):
             sigmas = None
@@ -325,13 +404,52 @@ class ScoreBasedGenerator(BaseEstimator):
             use_pdf_as_domain_indicator=True,
             verbose=self.verbose,
         )
-        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_)
+        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_ - len(conditioned_by_processed))  # noqa
         # NOTE: The order of (-1, n_samples) is based on np.repeat(X, n_samples, axis=0)  # noqa
+
+        if conditioned_by_processed:
+            paths = np.array([
+                np.hstack([
+                    conditioned_by_processed[c].reshape(-1, 1)
+                    if c in conditioned_by_processed else
+                    paths[step, :, :, _col2idx[c]].reshape(-1, 1)
+                    for c in range(self.n_outputs_)
+                ])
+                for step in range(n_steps)
+            ]).reshape(n_steps, -1, n_samples, self.n_outputs_)
+
         paths = paths.transpose(0, 2, 1, 3)
+        assert paths.shape == (n_steps, n_samples, paths.shape[2], self.n_outputs_)  # noqa
         # NOTE: transponse it because the structure of the output is easier to use when the shape is (n_steps, n_samples, N, n_outputs)  # noqa
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
         return paths if return_paths else paths[-1]
+
+    @overload
+    def _sample_euler(
+        self,
+        X: np.ndarray,
+        *,
+        n_samples: int = 1000,
+        n_steps: int = 1000,
+        init_sample: np.ndarray | None = None,
+        conditioned_by: Mapping[int, bool | int | float | np.ndarray] = {},
+        return_paths: bool = False,
+    ) -> np.ndarray:
+        ...
+
+    @overload
+    def _sample_euler(
+        self,
+        X: None = None,
+        *,
+        n_samples: int = 1000,
+        n_steps: int = 1000,
+        init_sample: np.ndarray | None = None,
+        conditioned_by: Mapping[int, bool | int | float] = {},
+        return_paths: bool = False,
+    ) -> np.ndarray:
+        ...
 
     def _sample_euler(
         self,
@@ -340,6 +458,7 @@ class ScoreBasedGenerator(BaseEstimator):
         n_samples: int = 1000,
         n_steps: int = 1000,
         init_sample: np.ndarray | None = None,
+        conditioned_by: Mapping[int, bool | int | float | np.ndarray] = {},
         return_paths: bool = False,
     ) -> np.ndarray:
         """Generate samples from the Euler method.
@@ -352,6 +471,12 @@ class ScoreBasedGenerator(BaseEstimator):
             init_sample (np.ndarray | None, optional): initial sample. Defaults to None.
                 (n_outputs,) shape array if it is not None.
                 NOTE: n_samples should be 1 if init_sample is not None because the same sample paths are generated.
+            conditioned_by (Mapping[int, bool | int | float | np.ndarray], optional): conditions. Defaults to {}.
+                The key is the index of the output betwee 0 and n_outputs-1.
+                The type of value is bool, int, float, or np.ndarray.
+                When the value is bool, int or float, all output samples are conditioned by the value.
+                When X is None, the value cannot be np.ndarray.
+                When X is not None, the value can be np.ndarray, and then the shape of the value must be (X.shape[0],).
             return_paths (bool, optional): flag to return paths. Defaults to False.
 
         Returns:
@@ -359,6 +484,16 @@ class ScoreBasedGenerator(BaseEstimator):
                 (n_steps, n_samples, N, n_outputs) shape array if return_paths is True.
                 (n_samples, N, n_outputs) shape array if return_paths is False.
         """  # noqa
+
+        if X is None:
+            assert all([not isinstance(v, np.ndarray) for v in conditioned_by.values()]), f'conditioned_by must be Mapping[int, bool | int | float]. But conditioned_by = {conditioned_by}'  # noqa
+        else:
+            assert all([v.shape == (X.shape[0],) for v in conditioned_by.values() if isinstance(v, np.ndarray)]), f'the shape of a np.ndarray value of conditioned_by must be (X.shape[0],). But conditioned_by = {conditioned_by}'  # noqa
+        assert len(conditioned_by) < self.n_outputs_, f'conditioned_by must be less than n_outputs. But len(conditioned_by) >= {len(conditioned_by)}'  # noqa
+        assert all([0 <= k < self.n_outputs_ for k in conditioned_by.keys()]), f'the key of conditioned_by must be between 0 and n_outputs-1. But conditioned_by.keys() = {conditioned_by.keys()}'  # noqa
+
+        _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
+
         if X is None:
             # x: (n_samples, n_outputs)
             if init_sample is not None:
@@ -366,18 +501,50 @@ class ScoreBasedGenerator(BaseEstimator):
             else:
                 x0 = np.random.randn(n_samples, self.n_outputs_) * max(self.noise_strengths_)  # noqa
 
+            conditioned_by_processed = {
+                k: np.array([[v]]*n_samples)
+                for k, v in conditioned_by.items()
+            }
+
             def f(x, t):
-                return - 0.5 * self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)  # noqa
+                if conditioned_by_processed:
+                    x = np.hstack([
+                        conditioned_by_processed[c]
+                        if c in conditioned_by_processed else
+                        x[:, _col2idx[c]][:, np.newaxis]
+                        for c in range(self.n_outputs_)
+                    ])
+                return - 0.5 * self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
         else:
             # x: (n_samples * N, n_outputs)
             if init_sample is not None:
                 x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*X.shape[0]*n_samples)  # noqa
             else:
                 x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
+
+            conditioned_by_processed = {
+                k: (
+                    np.repeat(v, n_samples, axis=0)[:, np.newaxis]
+                    if isinstance(v, np.ndarray) else
+                    np.array([[v]]*X.shape[0]*n_samples)
+                )
+                for k, v in conditioned_by.items()
+            }
+
             X = np.repeat(X, n_samples, axis=0)
 
             def f(x, t):
-                return - 0.5 * self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)  # noqa
+                if conditioned_by_processed:
+                    x = np.hstack([
+                        conditioned_by_processed[c]
+                        if c in conditioned_by_processed else
+                        x[:, _col2idx[c]][:, np.newaxis]
+                        for c in range(self.n_outputs_)
+                    ])
+                return - 0.5 * self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
+
+        if conditioned_by:
+            x0 = x0[:, [i for i in range(self.n_outputs_) if i not in conditioned_by.keys()]]  # noqa
 
         paths = euler(
             x0=x0,
@@ -387,13 +554,52 @@ class ScoreBasedGenerator(BaseEstimator):
             n_steps=n_steps,
             verbose=self.verbose,
         )[1]
-        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_)
+        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_ - len(conditioned_by_processed))  # noqa
         # NOTE: The order of (-1, n_samples) is based on np.repeat(X, n_samples, axis=0)  # noqa
+
+        if conditioned_by_processed:
+            paths = np.array([
+                np.hstack([
+                    conditioned_by_processed[c].reshape(-1, 1)
+                    if c in conditioned_by_processed else
+                    paths[step, :, :, _col2idx[c]].reshape(-1, 1)
+                    for c in range(self.n_outputs_)
+                ])
+                for step in range(n_steps)
+            ]).reshape(n_steps, -1, n_samples, self.n_outputs_)
+
         paths = paths.transpose(0, 2, 1, 3)
         # NOTE: transponse it because the structure of the output is easier to use when the shape is (n_steps, n_samples, N, n_outputs)  # noqa
+        assert paths.shape == (n_steps, n_samples, paths.shape[2], self.n_outputs_)  # noqa
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
         return paths if return_paths else paths[-1]
+
+    @overload
+    def _sample_euler_maruyama(
+        self,
+        X: np.ndarray,
+        *,
+        n_samples: int = 1000,
+        n_steps: int = 1000,
+        init_sample: np.ndarray | None = None,
+        conditioned_by: Mapping[int, bool | int | float | np.ndarray] = {},
+        return_paths: bool = False,
+    ) -> np.ndarray:
+        ...
+
+    @overload
+    def _sample_euler_maruyama(
+        self,
+        X: None = None,
+        *,
+        n_samples: int = 1000,
+        n_steps: int = 1000,
+        init_sample: np.ndarray | None = None,
+        conditioned_by: Mapping[int, bool | int | float | np.ndarray] = {},
+        return_paths: bool = False,
+    ) -> np.ndarray:
+        ...
 
     def _sample_euler_maruyama(
         self,
@@ -402,6 +608,7 @@ class ScoreBasedGenerator(BaseEstimator):
         n_samples: int = 1000,
         n_steps: int = 1000,
         init_sample: np.ndarray | None = None,
+        conditioned_by: Mapping[int, bool | int | float | np.ndarray] = {},
         return_paths: bool = False,
     ) -> np.ndarray:
         """Generate samples from the Euler-Maruyama method.
@@ -413,6 +620,12 @@ class ScoreBasedGenerator(BaseEstimator):
             init_sample (np.ndarray | None, optional): initial sample. Defaults to None.
                 (n_outputs,) shape array if it is not None.
                 NOTE: n_samples should be 1 if init_sample is not None because the same sample paths are generated.
+            conditioned_by (Mapping[int, bool | int | float | np.ndarray], optional): conditions. Defaults to {}.
+                The key is the index of the output betwee 0 and n_outputs-1.
+                The type of value is bool, int, float, or np.ndarray.
+                When the value is bool, int or float, all output samples are conditioned by the value.
+                When X is None, the value cannot be np.ndarray.
+                When X is not None, the value can be np.ndarray, and then the shape of the value must be (X.shape
             return_paths (bool, optional): flag to return paths. Defaults to False.
 
         Returns:
@@ -420,6 +633,16 @@ class ScoreBasedGenerator(BaseEstimator):
                 (n_step, n_samples, N, n_outputs) shape array if return_paths is True.
                 (n_samples, N, n_outputs) shape array if return_paths is False.
         """  # noqa
+
+        if X is None:
+            assert all([not isinstance(v, np.ndarray) for v in conditioned_by.values()]), f'conditioned_by must be Mapping[int, bool | int | float]. But conditioned_by = {conditioned_by}'  # noqa
+        else:
+            assert all([v.shape == (X.shape[0],) for v in conditioned_by.values() if isinstance(v, np.ndarray)]), f'the shape of a np.ndarray value of conditioned_by must be (X.shape[0],). But conditioned_by = {conditioned_by}'  # noqa
+        assert len(conditioned_by) < self.n_outputs_, f'conditioned_by must be less than n_outputs. But len(conditioned_by) >= {len(conditioned_by)}'  # noqa
+        assert all([0 <= k < self.n_outputs_ for k in conditioned_by.keys()]), f'the key of conditioned_by must be between 0 and n_outputs-1. But conditioned_by.keys() = {conditioned_by.keys()}'  # noqa
+
+        _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
+
         if X is None:
             # x: (n_samples, n_outputs)
             if init_sample is not None:
@@ -427,18 +650,50 @@ class ScoreBasedGenerator(BaseEstimator):
             else:
                 x0 = np.random.randn(n_samples, self.n_outputs_) * max(self.noise_strengths_)  # noqa
 
+            conditioned_by_processed = {
+                k: np.array([[v]]*n_samples)
+                for k, v in conditioned_by.items()
+            }
+
             def f(x, t):
-                return - self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)  # noqa
+                if conditioned_by_processed:
+                    x = np.hstack([
+                        conditioned_by_processed[c]
+                        if c in conditioned_by_processed else
+                        x[:, _col2idx[c]][:, np.newaxis]
+                        for c in range(self.n_outputs_)
+                    ])
+                return - self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
         else:
             # x: (n_samples * N, n_outputs)
             if init_sample is not None:
                 x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*X.shape[0]*n_samples)  # noqa
             else:
                 x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
+
+            conditioned_by_processed = {
+                k: (
+                    np.repeat(v, n_samples, axis=0)[:, np.newaxis]
+                    if isinstance(v, np.ndarray) else
+                    np.array([[v]]*X.shape[0]*n_samples)
+                )
+                for k, v in conditioned_by.items()
+            }
+
             X = np.repeat(X, n_samples, axis=0)
 
             def f(x, t):
-                return - self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)  # noqa
+                if conditioned_by_processed:
+                    x = np.hstack([
+                        conditioned_by_processed[c]
+                        if c in conditioned_by_processed else
+                        x[:, _col2idx[c]][:, np.newaxis]
+                        for c in range(self.n_outputs_)
+                    ])
+                return - self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
+
+        if conditioned_by:
+            x0 = x0[:, [i for i in range(self.n_outputs_) if i not in conditioned_by.keys()]]  # noqa
 
         paths = euler_maruyama(
             x0=x0,
@@ -449,13 +704,62 @@ class ScoreBasedGenerator(BaseEstimator):
             n_steps=n_steps,
             verbose=self.verbose,
         )[1]
-        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_)
+        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_ - len(conditioned_by_processed))  # noqa
         # NOTE: The order of (-1, n_samples) is based on np.repeat(X, n_samples, axis=0)  # noqa
+
+        if conditioned_by_processed:
+            paths = np.array([
+                np.hstack([
+                    conditioned_by_processed[c].reshape(-1, 1)
+                    if c in conditioned_by_processed else
+                    paths[step, :, :, _col2idx[c]].reshape(-1, 1)
+                    for c in range(self.n_outputs_)
+                ])
+                for step in range(n_steps)
+            ]).reshape(n_steps, -1, n_samples, self.n_outputs_)
+
         paths = paths.transpose(0, 2, 1, 3)
         # NOTE: transponse it because the structure of the output is easier to use when the shape is (n_steps, n_samples, N, n_outputs)  # noqa
+        assert paths.shape == (n_steps, n_samples, paths.shape[2], self.n_outputs_)  # noqa
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
         return paths if return_paths else paths[-1]
+
+    @overload
+    def sample(
+        self,
+        X: np.ndarray,
+        *,
+        n_samples: int = 1000,
+        sampling_method: SamplingMethod = SamplingMethod.LANGEVIN_MONTECARLO,
+        n_steps: int = 1000,
+        return_paths: bool = False,
+        init_sample: np.ndarray | None = None,
+        conditioned_by: Mapping[int, bool | int | float | np.ndarray] = {},
+        alpha: float = 0.1,  # only for langevin monte carlo
+        sigma: float | None = None,  # only for langevin monte carlo
+        is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,  # only for langevin monte carlo # noqa
+        seed: int | None = None,
+    ) -> np.ndarray:
+        ...
+
+    @overload
+    def sample(
+        self,
+        X: None = None,
+        *,
+        n_samples: int = 1000,
+        sampling_method: SamplingMethod = SamplingMethod.LANGEVIN_MONTECARLO,
+        n_steps: int = 1000,
+        return_paths: bool = False,
+        init_sample: np.ndarray | None = None,
+        conditioned_by: Mapping[int, bool | int | float] = {},
+        alpha: float = 0.1,  # only for langevin monte carlo
+        sigma: float | None = None,  # only for langevin monte carlo
+        is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,  # only for langevin monte carlo # noqa
+        seed: int | None = None,
+    ) -> np.ndarray:
+        ...
 
     def sample(
         self,
@@ -466,6 +770,7 @@ class ScoreBasedGenerator(BaseEstimator):
         n_steps: int = 1000,
         return_paths: bool = False,
         init_sample: np.ndarray | None = None,
+        conditioned_by: Mapping[int, bool | int | float | np.ndarray] = {},
         alpha: float = 0.1,  # only for langevin monte carlo
         sigma: float | None = None,  # only for langevin monte carlo
         is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,  # only for langevin monte carlo # noqa
@@ -480,6 +785,12 @@ class ScoreBasedGenerator(BaseEstimator):
             n_steps (int, optional): number of steps. Defaults to 1000.
             return_paths (bool, optional): flag to return paths. Defaults to False.
             init_sample (np.ndarray | None, optional): initial sample. Defaults to None. (n_outputs,) shape array if it is not None.  (NOTE: only for langevin monte carlo)
+            conditioned_by (Mapping[int, bool | int | float | np.ndarray], optional): conditions. Defaults to {}.  (NOTE: only for euler and euler-maruyama)
+                The key is the index of the output betwee 0 and n_outputs-1.
+                The type of value is bool, int, float, or np.ndarray.
+                When the value is bool, int or float, all output samples are conditioned by the value.
+                When X is None, the value cannot be np.ndarray.
+                When X is not None, the value can be np.ndarray, and then the shape of the value must be (X.shape[0],).
 
             alpha (float, optional): time step size of the Langevin Monte Carlo algorithm. Defaults to 0.1. (NOTE: only for langevin monte carlo)
             sigma (float | None, optional): noise strength. Defaults to None. (NOTE: only for langevin monte carlo)
@@ -500,29 +811,32 @@ class ScoreBasedGenerator(BaseEstimator):
         with np_seed(seed):
             if sampling_method == ScoreBasedGenerator.SamplingMethod.LANGEVIN_MONTECARLO:  # noqa
                 return self._sample_langenvin_montecarlo(
-                    X,
+                    X,  # type: ignore
                     n_samples=n_samples,
                     n_steps=n_steps,
                     alpha=alpha,
                     sigma=sigma,
                     init_sample=init_sample,
                     is_in_valid_domain_func=is_in_valid_domain_func,
+                    conditioned_by=conditioned_by,
                     return_paths=return_paths,
                 )
             elif sampling_method == ScoreBasedGenerator.SamplingMethod.EULER:  # noqa
                 return self._sample_euler(
-                    X,
+                    X,  # type: ignore
                     n_samples=n_samples,
                     n_steps=n_steps,
                     init_sample=init_sample,
+                    conditioned_by=conditioned_by,
                     return_paths=return_paths,
                 )
             elif sampling_method == ScoreBasedGenerator.SamplingMethod.EULER_MARUYAMA:  # noqa
                 return self._sample_euler_maruyama(
-                    X,
+                    X,  # type: ignore
                     n_samples=n_samples,
                     n_steps=n_steps,
                     init_sample=init_sample,
+                    conditioned_by=conditioned_by,
                     return_paths=return_paths,
                 )
             else:
