@@ -308,13 +308,9 @@ class ScoreBasedGenerator(BaseEstimator):
 
         _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
         x0 = self._initialize_samples(X, n_samples, init_sample, conditioned_by)  # noqa
+        conditioned_by_processed = self._preprocess_conditioned_by(X, n_samples, conditioned_by)  # noqa
 
         if X is None:
-            conditioned_by_processed = {
-                k: np.array([[v]]*n_samples)
-                for k, v in conditioned_by.items()
-            }
-
             def dU(x, sigma):
                 if conditioned_by_processed:
                     x = np.hstack([
@@ -325,15 +321,6 @@ class ScoreBasedGenerator(BaseEstimator):
                     ])
                 return - self.estimator_.predict(np.hstack([x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
         else:
-            conditioned_by_processed = {
-                k: (
-                    np.repeat(v, n_samples, axis=0)[:, np.newaxis]
-                    if isinstance(v, np.ndarray) else
-                    np.array([[v]]*X.shape[0]*n_samples)
-                )
-                for k, v in conditioned_by.items()
-            }
-
             X = np.repeat(X, n_samples, axis=0)
 
             def dU(x, sigma):
@@ -482,13 +469,9 @@ class ScoreBasedGenerator(BaseEstimator):
 
         _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
         x0 = self._initialize_samples(X, n_samples, init_sample, conditioned_by)  # noqa
+        conditioned_by_processed = self._preprocess_conditioned_by(X, n_samples, conditioned_by)  # noqa
 
         if X is None:
-            conditioned_by_processed = {
-                k: np.array([[v]]*n_samples)
-                for k, v in conditioned_by.items()
-            }
-
             def f(x, t):
                 if conditioned_by_processed:
                     x = np.hstack([
@@ -499,15 +482,6 @@ class ScoreBasedGenerator(BaseEstimator):
                     ])
                 return - 0.5 * self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
         else:
-            conditioned_by_processed = {
-                k: (
-                    np.repeat(v, n_samples, axis=0)[:, np.newaxis]
-                    if isinstance(v, np.ndarray) else
-                    np.array([[v]]*X.shape[0]*n_samples)
-                )
-                for k, v in conditioned_by.items()
-            }
-
             X = np.repeat(X, n_samples, axis=0)
 
             def f(x, t):
@@ -618,13 +592,9 @@ class ScoreBasedGenerator(BaseEstimator):
 
         _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
         x0 = self._initialize_samples(X, n_samples, init_sample, conditioned_by)  # noqa
+        conditioned_by_processed = self._preprocess_conditioned_by(X, n_samples, conditioned_by)  # noqa
 
         if X is None:
-            conditioned_by_processed = {
-                k: np.array([[v]]*n_samples)
-                for k, v in conditioned_by.items()
-            }
-
             def f(x, t):
                 if conditioned_by_processed:
                     x = np.hstack([
@@ -635,15 +605,6 @@ class ScoreBasedGenerator(BaseEstimator):
                     ])
                 return - self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
         else:
-            conditioned_by_processed = {
-                k: (
-                    np.repeat(v, n_samples, axis=0)[:, np.newaxis]
-                    if isinstance(v, np.ndarray) else
-                    np.array([[v]]*X.shape[0]*n_samples)
-                )
-                for k, v in conditioned_by.items()
-            }
-
             X = np.repeat(X, n_samples, axis=0)
 
             def f(x, t):
@@ -940,3 +901,32 @@ class ScoreBasedGenerator(BaseEstimator):
             x0 = np.random.randn(n_samples * N, self.n_outputs_)*max(self.noise_strengths_)  # noqa
 
         return x0[:, [i for i in range(self.n_outputs_) if i not in conditioned_by.keys()]]  # noqa
+
+    @staticmethod
+    def _preprocess_conditioned_by(
+        X: np.ndarray | None,
+        n_samples: int,
+        conditioned_by: Mapping[int, bool | int | float | np.ndarray],
+    ) -> Mapping[int, np.ndarray]:
+        '''Preprocess the conditioned_by
+
+        Args:
+            X (np.ndarray | None): conditions.
+            n_samples (int): number of samples.
+            conditioned_by (Mapping[int, bool | int | float | np.ndarray]): conditions of x0.
+
+        Returns:
+            Mapping[int, np.ndarray]: preprocessed conditioned_by
+                The shape of the value is (n_samples, 1) if X is None.
+                The shape of the value is (n_samples * N, 1) if X is not None, where N = X.shape[0].
+        '''  # noqa
+        N = 1 if X is None else X.shape[0]
+        preprocessed_conditioned_by = {
+            k: (
+                np.repeat(v[:, np.newaxis], n_samples, axis=0)
+                if isinstance(v, np.ndarray) else
+                np.array([[v]]*N*n_samples)
+            )
+            for k, v in conditioned_by.items()
+        }
+        return preprocessed_conditioned_by

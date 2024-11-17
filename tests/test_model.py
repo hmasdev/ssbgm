@@ -1262,3 +1262,59 @@ def test_ScoreBasedGenerator__initialize_samples(
         # initialized by init_sample
         init_sample_ = init_sample[[i for i in range(n_outputs) if i not in conditioned_by]]  # noqa
         assert np.all(x0 == np.repeat(init_sample_[np.newaxis, :], n_samples * N, axis=0))  # noqa
+
+
+@pytest.mark.parametrize(
+    'X,n_samples,conditioned_by,expected',
+    [
+        (
+            None,
+            3,
+            {},
+            {},
+        ),
+        (
+            None,
+            3,  # =: n_samples
+            {0: 1},
+            {0: np.array([[1], [1], [1]])},  # Shape: (n_samples, 1)
+        ),
+        (
+            np.array([[1, 2], [3, 4]]),
+            3,
+            {},
+            {},
+        ),
+        (
+            np.array([[1, 2], [3, 4]]),  # N = 2
+            3,  # =: n_samples
+            {0: 1},
+            {0: np.array([[1], [1], [1], [1], [1], [1]])},  # Shape: (N * n_samples, 1)  # noqa
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),  # N = 3
+            2,  # =: n_samples
+            {0: np.array([1, 2, 3])},
+            {0: np.array([[1], [1], [2], [2], [3], [3]])},  # Shape: (N * n_samples, 1)  # noqa
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),  # N = 3
+            2,  # =: n_samples
+            {0: np.array([1, 2, 3]), 1: 1},
+            {
+                0: np.array([[1], [1], [2], [2], [3], [3]]),
+                1: np.array([[1], [1], [1], [1], [1], [1]]),
+            },  # noqa
+        )
+
+    ]
+)
+def test_ScoreBasedGenerator__preprocess_conditioned_by(
+    X: np.ndarray | None,
+    n_samples: int,
+    conditioned_by: dict[int, int | np.ndarray],
+    expected: dict[int, np.ndarray],
+) -> None:
+    actual = ScoreBasedGenerator._preprocess_conditioned_by(X, n_samples, conditioned_by)  # noqa
+    for k, v in actual.items():
+        np.testing.assert_array_equal(v, expected[k])
