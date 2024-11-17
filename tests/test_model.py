@@ -1,4 +1,5 @@
 from itertools import product
+from typing import Mapping
 import numpy as np
 import pytest
 from sklearn.linear_model import LinearRegression
@@ -6,6 +7,7 @@ from ssbgm.model import (
     create_noised_data,
     ScoreBasedGenerator,
 )
+from ssbgm.utils import np_seed
 
 # TODO: test whether calling ScoreBasedGenerator.sample raises NotFittedError when ScoreBasedGenerator is not fitted  # noqa
 
@@ -1151,3 +1153,112 @@ def test_ScoreBasedGenerator__validate_kwargs_for_sample(
             sbm._validate_kwargs_for_sample(**kwargs)  # type: ignore
     else:
         sbm._validate_kwargs_for_sample(**kwargs)  # type: ignore
+
+
+@pytest.mark.parametrize(
+    'Xtr,ytr,X,n_samples,init_sample,conditioned_by',
+    [
+        # Requires ytr and X
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([0, 1, 0]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            10,
+            None,  # init_sample is None
+            {},  # conditioned_by is empty
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            10,
+            np.array([1, 2]),
+            {},  # conditioned_by is empty
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            10,
+            None,  # init_sample is None
+            {0: 1},  # conditioned_by is not empty
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            10,
+            np.array([1, 2]),
+            {0: 1},  # conditioned_by is not empty
+        ),
+        # Does not require ytr and X
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            None,
+            None,
+            10,
+            None,  # init_sample is None
+            {},  # conditioned_by is empty
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            None,
+            None,
+            10,
+            np.array([1, 2]),
+            {},  # conditioned_by is empty
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            None,
+            None,
+            10,
+            None,  # init_sample is None
+            {0: 1},  # conditioned_by is not empty
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            None,
+            None,
+            10,
+            np.array([1, 2]),
+            {0: 1},  # conditioned_by is not empty
+        ),
+    ]
+)
+def test_ScoreBasedGenerator__initialize_samples(
+    Xtr: np.ndarray,
+    ytr: np.ndarray | None,
+    X: np.ndarray | None,
+    n_samples: int,
+    init_sample: np.ndarray | None,
+    conditioned_by: Mapping[int, bool | int | float | np.ndarray],
+) -> None:
+    # TODO: Test with invalid inputs
+
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.fit(Xtr, ytr)
+    with np_seed(0):
+        x0 = sbm._initialize_samples(
+            X=X,
+            n_samples=n_samples,
+            init_sample=init_sample,
+            conditioned_by=conditioned_by,
+        )
+
+    # check shape
+    N = 1 if X is None else X.shape[0]
+    n_outputs = sbm.n_outputs_
+    assert n_samples > 0
+    assert N > 0
+    assert n_outputs - len(conditioned_by) > 0
+    assert x0.shape == (n_samples * N, n_outputs - len(conditioned_by))
+
+    # check random
+    if init_sample is None:
+        # randomly generated
+        assert np.any(x0 != x0.mean())
+    else:
+        # initialized by init_sample
+        init_sample_ = init_sample[[i for i in range(n_outputs) if i not in conditioned_by]]  # noqa
+        assert np.all(x0 == np.repeat(init_sample_[np.newaxis, :], n_samples * N, axis=0))  # noqa

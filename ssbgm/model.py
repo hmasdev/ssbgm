@@ -307,14 +307,9 @@ class ScoreBasedGenerator(BaseEstimator):
         )
 
         _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
+        x0 = self._initialize_samples(X, n_samples, init_sample, conditioned_by)  # noqa
 
         if X is None:
-            # x: (n_samples, n_outputs)
-            if init_sample is not None:
-                x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*n_samples)  # noqa
-            else:
-                x0 = np.random.randn(n_samples, self.n_outputs_) * max(self.noise_strengths_)  # noqa
-
             conditioned_by_processed = {
                 k: np.array([[v]]*n_samples)
                 for k, v in conditioned_by.items()
@@ -330,16 +325,6 @@ class ScoreBasedGenerator(BaseEstimator):
                     ])
                 return - self.estimator_.predict(np.hstack([x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
         else:
-            # x: (n_samples * N, n_outputs)
-            if init_sample is not None:
-                if init_sample.size == self.n_outputs_:
-                    x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*X.shape[0]*n_samples)  # noqa
-                else:
-                    assert init_sample.shape == (X.shape[0], self.n_outputs_)
-                    x0 = np.repeat(init_sample, n_samples, axis=0)
-            else:
-                x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
-
             conditioned_by_processed = {
                 k: (
                     np.repeat(v, n_samples, axis=0)[:, np.newaxis]
@@ -360,9 +345,6 @@ class ScoreBasedGenerator(BaseEstimator):
                         for c in range(self.n_outputs_)
                     ])
                 return - self.estimator_.predict(np.hstack([X, x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
-
-        if conditioned_by:
-            x0 = x0[:, [i for i in range(self.n_outputs_) if i not in conditioned_by.keys()]]  # noqa
 
         if isinstance(sigma, (bool, int, float)):
             sigmas = None
@@ -499,14 +481,9 @@ class ScoreBasedGenerator(BaseEstimator):
         )
 
         _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
+        x0 = self._initialize_samples(X, n_samples, init_sample, conditioned_by)  # noqa
 
         if X is None:
-            # x: (n_samples, n_outputs)
-            if init_sample is not None:
-                x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*n_samples)  # noqa
-            else:
-                x0 = np.random.randn(n_samples, self.n_outputs_) * max(self.noise_strengths_)  # noqa
-
             conditioned_by_processed = {
                 k: np.array([[v]]*n_samples)
                 for k, v in conditioned_by.items()
@@ -522,12 +499,6 @@ class ScoreBasedGenerator(BaseEstimator):
                     ])
                 return - 0.5 * self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
         else:
-            # x: (n_samples * N, n_outputs)
-            if init_sample is not None:
-                x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*X.shape[0]*n_samples)  # noqa
-            else:
-                x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
-
             conditioned_by_processed = {
                 k: (
                     np.repeat(v, n_samples, axis=0)[:, np.newaxis]
@@ -548,9 +519,6 @@ class ScoreBasedGenerator(BaseEstimator):
                         for c in range(self.n_outputs_)
                     ])
                 return - 0.5 * self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
-
-        if conditioned_by:
-            x0 = x0[:, [i for i in range(self.n_outputs_) if i not in conditioned_by.keys()]]  # noqa
 
         paths = euler(
             x0=x0,
@@ -649,14 +617,9 @@ class ScoreBasedGenerator(BaseEstimator):
         )
 
         _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
+        x0 = self._initialize_samples(X, n_samples, init_sample, conditioned_by)  # noqa
 
         if X is None:
-            # x: (n_samples, n_outputs)
-            if init_sample is not None:
-                x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*n_samples)  # noqa
-            else:
-                x0 = np.random.randn(n_samples, self.n_outputs_) * max(self.noise_strengths_)  # noqa
-
             conditioned_by_processed = {
                 k: np.array([[v]]*n_samples)
                 for k, v in conditioned_by.items()
@@ -672,12 +635,6 @@ class ScoreBasedGenerator(BaseEstimator):
                     ])
                 return - self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
         else:
-            # x: (n_samples * N, n_outputs)
-            if init_sample is not None:
-                x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*X.shape[0]*n_samples)  # noqa
-            else:
-                x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
-
             conditioned_by_processed = {
                 k: (
                     np.repeat(v, n_samples, axis=0)[:, np.newaxis]
@@ -698,9 +655,6 @@ class ScoreBasedGenerator(BaseEstimator):
                         for c in range(self.n_outputs_)
                     ])
                 return - self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
-
-        if conditioned_by:
-            x0 = x0[:, [i for i in range(self.n_outputs_) if i not in conditioned_by.keys()]]  # noqa
 
         paths = euler_maruyama(
             x0=x0,
@@ -894,6 +848,8 @@ class ScoreBasedGenerator(BaseEstimator):
         X_ = np.hstack([X,]+([] if y is None else [y])+[sigma.reshape(-1, 1)])
         return self.estimator_.predict(X_)  # type: ignore
 
+    # Utilities
+
     def _validate_kwargs_for_sample(
         self,
         X: np.ndarray | None = None,
@@ -951,3 +907,36 @@ class ScoreBasedGenerator(BaseEstimator):
                 raise ValueError(f'all values of sigma must be positive but sigma = {sigma}')  # noqa
             if (not isinstance(sigma, Iterable)) and sigma <= 0:
                 raise ValueError(f'sigma must be positive but sigma = {sigma}')
+
+    def _initialize_samples(
+        self,
+        X: np.ndarray | None,
+        n_samples: int,
+        init_sample: np.ndarray | None,
+        conditioned_by: Mapping[int, bool | int | float | np.ndarray],
+    ) -> np.ndarray:
+        '''Initialize the sample paths, i.e. create the initial samples
+
+        Args:
+            X (np.ndarray | None): conditions.
+            n_samples (int): number of samples.
+            init_sample (np.ndarray | None): initial sample.
+            conditioned_by (Mapping[int, bool | int | float | np.ndarray]): conditions of x0.
+
+        Returns:
+            np.ndarray: initial samples
+                Shape: (n_samples, n_outputs - len(conditioned_by)) if X is None.
+                Shape: (n_samples * N, n_outputs - len(conditioned_by)) if X is not None, where N = X.shape[0].
+
+        NOTE:
+            the elements of x0 are independently generated from the normal distribution N(0, max(noise_strengths_)^2).  # noqa
+        '''  # noqa
+
+        N: int = 1 if X is None else X.shape[0]
+
+        if init_sample is not None:
+            x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*N*n_samples)  # noqa
+        else:
+            x0 = np.random.randn(n_samples * N, self.n_outputs_)*max(self.noise_strengths_)  # noqa
+
+        return x0[:, [i for i in range(self.n_outputs_) if i not in conditioned_by.keys()]]  # noqa
