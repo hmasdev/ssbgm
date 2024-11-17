@@ -312,13 +312,13 @@ class ScoreBasedGenerator(BaseEstimator):
 
         if X is None:
             def dU(x, sigma):
-                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed)  # noqa
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
                 return - self.estimator_.predict(np.hstack([x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
         else:
             X = np.repeat(X, n_samples, axis=0)
 
             def dU(x, sigma):
-                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed)  # noqa
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
                 return - self.estimator_.predict(np.hstack([X, x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
 
         if isinstance(sigma, (bool, int, float)):
@@ -366,7 +366,7 @@ class ScoreBasedGenerator(BaseEstimator):
             use_pdf_as_domain_indicator=True,
             verbose=self.verbose,
         )
-        paths = self._postprocess_sample_paths(paths, n_steps, n_samples, conditioned_by_processed)  # noqa
+        paths = self._postprocess_sample_paths(paths, n_steps, n_samples, conditioned_by_processed, _col2idx)  # noqa
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
         return paths if return_paths else paths[-1]
@@ -445,13 +445,13 @@ class ScoreBasedGenerator(BaseEstimator):
 
         if X is None:
             def f(x, t):
-                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed)  # noqa
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
                 return - 0.5 * self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
         else:
             X = np.repeat(X, n_samples, axis=0)
 
             def f(x, t):
-                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed)  # noqa
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
                 return - 0.5 * self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
 
         paths = euler(
@@ -462,7 +462,7 @@ class ScoreBasedGenerator(BaseEstimator):
             n_steps=n_steps,
             verbose=self.verbose,
         )[1]
-        paths = self._postprocess_sample_paths(paths, n_steps, n_samples, conditioned_by_processed)  # noqa
+        paths = self._postprocess_sample_paths(paths, n_steps, n_samples, conditioned_by_processed, _col2idx)  # noqa
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
         return paths if return_paths else paths[-1]
@@ -540,13 +540,13 @@ class ScoreBasedGenerator(BaseEstimator):
 
         if X is None:
             def f(x, t):
-                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed)  # noqa
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
                 return - self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
         else:
             X = np.repeat(X, n_samples, axis=0)
 
             def f(x, t):
-                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed)  # noqa
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
                 return - self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
 
         paths = euler_maruyama(
@@ -558,7 +558,7 @@ class ScoreBasedGenerator(BaseEstimator):
             n_steps=n_steps,
             verbose=self.verbose,
         )[1]
-        paths = self._postprocess_sample_paths(paths, n_steps, n_samples, conditioned_by_processed)  # noqa
+        paths = self._postprocess_sample_paths(paths, n_steps, n_samples, conditioned_by_processed, _col2idx)  # noqa
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
         return paths if return_paths else paths[-1]
@@ -851,6 +851,7 @@ class ScoreBasedGenerator(BaseEstimator):
         self,
         x: np.ndarray,
         conditioned_by_processed: Mapping[int, np.ndarray],
+        map_dim_in_output_2_dim_in_x: Mapping[int, int] | None = None,
     ):
         '''Insert conditioned x to unconditioned x
 
@@ -859,20 +860,21 @@ class ScoreBasedGenerator(BaseEstimator):
                 Shape: (*, n_outputs - len(conditioned_by_processed)).
             conditioned_by_processed (Mapping[int, np.ndarray]): conditioned x.
                 The shape of the value is (*, 1).
+            map_dim_in_output_2_dim_in_x (Mapping[int, int] | None): mapping from the dimension of the output to the dimension of x. Defaults to None.
 
         Returns:
             np.ndarray: x with conditioned x.
                 Shape: (*, n_outputs).
         '''  # noqa
         if conditioned_by_processed:
-            map_dim_in_output_2_dim_in_x = {
-                # FIXME: it is inefficient to create this dictionary every time.
-                dio: i
-                for i, dio in enumerate([
-                    dio_ for dio_ in range(self.n_outputs_)
-                    if dio_ not in conditioned_by_processed
-                ])
-            }
+            if map_dim_in_output_2_dim_in_x is None:
+                map_dim_in_output_2_dim_in_x = {
+                    dio: i
+                    for i, dio in enumerate([
+                        dio_ for dio_ in range(self.n_outputs_)
+                        if dio_ not in conditioned_by_processed
+                    ])
+                }
             x = np.hstack([
                 conditioned_by_processed[c]
                 if c in conditioned_by_processed else
@@ -887,6 +889,7 @@ class ScoreBasedGenerator(BaseEstimator):
         n_steps: int,
         n_samples: int,
         conditioned_by_processed: Mapping[int, np.ndarray],
+        map_dim_in_output_2_dim_in_x: Mapping[int, int] | None = None,
     ) -> np.ndarray:
         '''Postprocess the sample paths
 
@@ -897,6 +900,8 @@ class ScoreBasedGenerator(BaseEstimator):
             n_steps (int): number of steps.
             n_samples (int): number of samples.
             conditioned_by_processed (Mapping[int, np.ndarray]): conditioned x.
+                The shape of the value is (n_samples * N, 1).
+            map_dim_in_output_2_dim_in_x (Mapping[int, int] | None): mapping from the dimension of the output to the dimension of x. Defaults to None.
 
         Returns:
             np.ndarray: postprocessed sample paths.
@@ -906,18 +911,18 @@ class ScoreBasedGenerator(BaseEstimator):
         # NOTE: The order of (..., -1, n_samples, ...) is based on np.repeat(X, n_samples, axis=0)  # noqa
 
         if conditioned_by_processed:
-            map_dim_in_output_2_dim_in_x = {
-                # FIXME: it is inefficient to create this dictionary every time.
-                dio: i
-                for i, dio in enumerate([
-                    dio_ for dio_ in range(self.n_outputs_)
-                    if dio_ not in conditioned_by_processed
-                ])
-            }
+            if map_dim_in_output_2_dim_in_x is None:
+                map_dim_in_output_2_dim_in_x = {
+                    dio: i
+                    for i, dio in enumerate([
+                        dio_ for dio_ in range(self.n_outputs_)
+                        if dio_ not in conditioned_by_processed
+                    ])
+                }
             # Attach conditioned x to the paths
             paths = np.array([
                 np.hstack([
-                    conditioned_by_processed[c].reshape(-1, 1)
+                    conditioned_by_processed[c]
                     if c in conditioned_by_processed else
                     paths[step, :, :, map_dim_in_output_2_dim_in_x[c]].reshape(-1, 1)  # noqa
                     for c in range(self.n_outputs_)
