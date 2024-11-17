@@ -306,49 +306,55 @@ class ScoreBasedGenerator(BaseEstimator):
             is_in_valid_domain_func=is_in_valid_domain_func,
         )
 
+        # preparation
         _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
+        _vals_of_col2idx = sorted(_col2idx.values())
         x0 = self._initialize_samples(X, n_samples, init_sample, conditioned_by)  # noqa
         conditioned_by_processed = self._preprocess_conditioned_by(X, n_samples, conditioned_by)  # noqa
 
+        # define the gradient of the potential energy function
         if X is None:
             def dU(x, sigma):
                 x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
-                return - self.estimator_.predict(np.hstack([x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
+                return - self.estimator_.predict(np.hstack([x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, _vals_of_col2idx]  # noqa
         else:
             X = np.repeat(X, n_samples, axis=0)
 
             def dU(x, sigma):
                 x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
-                return - self.estimator_.predict(np.hstack([X, x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
+                return - self.estimator_.predict(np.hstack([X, x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, _vals_of_col2idx]  # noqa
 
-        if isinstance(sigma, (bool, int, float)):
-            sigmas = None
+        # decrease the noise strength step by step
+        sigmas: Iterable[float]
+        if isinstance(sigma, Iterable):
+            sigmas = sorted(sigma)[::-1][:-1]
+            sigma = min(sigma)
         elif sigma is None:
             sigmas = sorted(self.noise_strengths_)[::-1]
+            sigma = min(self.noise_strengths_)
         else:
-            sigmas = sorted(sigma)[::-1]
-        if sigmas is not None:
-            for sigma in sigmas:
-                # NOTE: decrease the noise strength step by step
-                x0 = langevin_montecarlo(
-                    x0=x0,
-                    nabla_U=partial(dU, sigma=sigma),
-                    n_steps=n_steps,
-                    delta_t=alpha,
-                    pdf=(lambda x: self._large_value * is_in_valid_domain_func(x)) if is_in_valid_domain_func is not None else None,  # noqa
-                    # NOTE:
-                    # is_in_valid_domain_func is not a valid probability density function.  # noqa
-                    # But is_in_valid_domain_func is used for the purpose of filtering out invalid values  # noqa
-                    # FIXME:
-                    # self.large_value is multiplied to pdf to avoid unexpected rejection.  # noqa
-                    # MALA use the min(1, (pdf(z_k^l) q(x_{k-1}|z_k^l)) / (pdf(x_{k-1}) q(z_k^l|x_{k-1}))).  # noqa
-                    # So, there is a pair of (z_k^l, x_{k-1}) that both are in the valid domain but z_k^l is rejected.  # noqa
-                    # To avoid this, the large value is multiplied to pdf.
-                    use_pdf_as_domain_indicator=True,
-                    verbose=self.verbose,
-                )[-1]
+            sigmas = []
+            sigma = float(sigma)
+        for sigma_ in sigmas:
+            # NOTE: decrease the noise strength step by step
+            x0 = langevin_montecarlo(
+                x0=x0,
+                nabla_U=partial(dU, sigma=sigma_),
+                n_steps=n_steps,
+                delta_t=alpha,
+                pdf=(lambda x: self._large_value * is_in_valid_domain_func(x)) if is_in_valid_domain_func is not None else None,  # noqa
+                # NOTE:
+                # is_in_valid_domain_func is not a valid probability density function.  # noqa
+                # But is_in_valid_domain_func is used for the purpose of filtering out invalid values  # noqa
+                # FIXME:
+                # self.large_value is multiplied to pdf to avoid unexpected rejection.  # noqa
+                # MALA use the min(1, (pdf(z_k^l) q(x_{k-1}|z_k^l)) / (pdf(x_{k-1}) q(z_k^l|x_{k-1}))).  # noqa
+                # So, there is a pair of (z_k^l, x_{k-1}) that both are in the valid domain but z_k^l is rejected.  # noqa
+                # To avoid this, the large value is multiplied to pdf.
+                use_pdf_as_domain_indicator=True,
+                verbose=self.verbose,
+            )[-1]
 
-        # Output: (n_samples, N, n_outputs)
         paths = langevin_montecarlo(
             x0=x0,
             nabla_U=partial(dU, sigma=sigma),
@@ -430,6 +436,7 @@ class ScoreBasedGenerator(BaseEstimator):
                 (n_steps, n_samples, N, n_outputs) shape array if return_paths is True.
                 (n_samples, N, n_outputs) shape array if return_paths is False.
         """  # noqa
+        # validation
         self._validate_kwargs_for_sample(
             X=X,
             n_samples=n_samples,
@@ -438,22 +445,23 @@ class ScoreBasedGenerator(BaseEstimator):
             conditioned_by=conditioned_by,
             return_paths=return_paths,
         )
-
+        # preparation
         _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
+        _vals_of_col2idx = sorted(_col2idx.values())
         x0 = self._initialize_samples(X, n_samples, init_sample, conditioned_by)  # noqa
         conditioned_by_processed = self._preprocess_conditioned_by(X, n_samples, conditioned_by)  # noqa
-
+        # define ODE
         if X is None:
             def f(x, t):
                 x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
-                return - 0.5 * self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
+                return - 0.5 * self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, _vals_of_col2idx]  # noqa
         else:
             X = np.repeat(X, n_samples, axis=0)
 
             def f(x, t):
                 x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
-                return - 0.5 * self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
-
+                return - 0.5 * self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, _vals_of_col2idx]  # noqa
+        # generate samples
         paths = euler(
             x0=x0,
             f=f,
@@ -525,6 +533,7 @@ class ScoreBasedGenerator(BaseEstimator):
                 (n_step, n_samples, N, n_outputs) shape array if return_paths is True.
                 (n_samples, N, n_outputs) shape array if return_paths is False.
         """  # noqa
+        # validation
         self._validate_kwargs_for_sample(
             X=X,
             n_samples=n_samples,
@@ -533,22 +542,23 @@ class ScoreBasedGenerator(BaseEstimator):
             conditioned_by=conditioned_by,
             return_paths=return_paths,
         )
-
+        # preparation
         _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
+        _vals_of_col2idx = sorted(_col2idx.values())
         x0 = self._initialize_samples(X, n_samples, init_sample, conditioned_by)  # noqa
         conditioned_by_processed = self._preprocess_conditioned_by(X, n_samples, conditioned_by)  # noqa
-
+        # define SDE
         if X is None:
             def f(x, t):
                 x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
-                return - self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
+                return - self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, _vals_of_col2idx]  # noqa
         else:
             X = np.repeat(X, n_samples, axis=0)
 
             def f(x, t):
                 x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
-                return - self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
-
+                return - self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, _vals_of_col2idx]  # noqa
+        # generate samples
         paths = euler_maruyama(
             x0=x0,
             f=f,
