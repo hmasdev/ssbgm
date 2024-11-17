@@ -366,23 +366,7 @@ class ScoreBasedGenerator(BaseEstimator):
             use_pdf_as_domain_indicator=True,
             verbose=self.verbose,
         )
-        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_ - len(conditioned_by_processed))  # noqa
-        # NOTE: The order of (-1, n_samples) is based on np.repeat(X, n_samples, axis=0)  # noqa
-
-        if conditioned_by_processed:
-            paths = np.array([
-                np.hstack([
-                    conditioned_by_processed[c].reshape(-1, 1)
-                    if c in conditioned_by_processed else
-                    paths[step, :, :, _col2idx[c]].reshape(-1, 1)
-                    for c in range(self.n_outputs_)
-                ])
-                for step in range(n_steps)
-            ]).reshape(n_steps, -1, n_samples, self.n_outputs_)
-
-        paths = paths.transpose(0, 2, 1, 3)
-        assert paths.shape == (n_steps, n_samples, paths.shape[2], self.n_outputs_)  # noqa
-        # NOTE: transponse it because the structure of the output is easier to use when the shape is (n_steps, n_samples, N, n_outputs)  # noqa
+        paths = self._postprocess_sample_paths(paths, n_steps, n_samples, conditioned_by_processed)  # noqa
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
         return paths if return_paths else paths[-1]
@@ -478,23 +462,7 @@ class ScoreBasedGenerator(BaseEstimator):
             n_steps=n_steps,
             verbose=self.verbose,
         )[1]
-        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_ - len(conditioned_by_processed))  # noqa
-        # NOTE: The order of (-1, n_samples) is based on np.repeat(X, n_samples, axis=0)  # noqa
-
-        if conditioned_by_processed:
-            paths = np.array([
-                np.hstack([
-                    conditioned_by_processed[c].reshape(-1, 1)
-                    if c in conditioned_by_processed else
-                    paths[step, :, :, _col2idx[c]].reshape(-1, 1)
-                    for c in range(self.n_outputs_)
-                ])
-                for step in range(n_steps)
-            ]).reshape(n_steps, -1, n_samples, self.n_outputs_)
-
-        paths = paths.transpose(0, 2, 1, 3)
-        # NOTE: transponse it because the structure of the output is easier to use when the shape is (n_steps, n_samples, N, n_outputs)  # noqa
-        assert paths.shape == (n_steps, n_samples, paths.shape[2], self.n_outputs_)  # noqa
+        paths = self._postprocess_sample_paths(paths, n_steps, n_samples, conditioned_by_processed)  # noqa
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
         return paths if return_paths else paths[-1]
@@ -590,23 +558,7 @@ class ScoreBasedGenerator(BaseEstimator):
             n_steps=n_steps,
             verbose=self.verbose,
         )[1]
-        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_ - len(conditioned_by_processed))  # noqa
-        # NOTE: The order of (-1, n_samples) is based on np.repeat(X, n_samples, axis=0)  # noqa
-
-        if conditioned_by_processed:
-            paths = np.array([
-                np.hstack([
-                    conditioned_by_processed[c].reshape(-1, 1)
-                    if c in conditioned_by_processed else
-                    paths[step, :, :, _col2idx[c]].reshape(-1, 1)
-                    for c in range(self.n_outputs_)
-                ])
-                for step in range(n_steps)
-            ]).reshape(n_steps, -1, n_samples, self.n_outputs_)
-
-        paths = paths.transpose(0, 2, 1, 3)
-        # NOTE: transponse it because the structure of the output is easier to use when the shape is (n_steps, n_samples, N, n_outputs)  # noqa
-        assert paths.shape == (n_steps, n_samples, paths.shape[2], self.n_outputs_)  # noqa
+        paths = self._postprocess_sample_paths(paths, n_steps, n_samples, conditioned_by_processed)  # noqa
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
         return paths if return_paths else paths[-1]
@@ -928,3 +880,55 @@ class ScoreBasedGenerator(BaseEstimator):
                 for c in range(self.n_outputs_)
             ])
         return x
+
+    def _postprocess_sample_paths(
+        self,
+        paths: np.ndarray,
+        n_steps: int,
+        n_samples: int,
+        conditioned_by_processed: Mapping[int, np.ndarray],
+    ) -> np.ndarray:
+        '''Postprocess the sample paths
+
+        Args:
+            paths (np.ndarray): sample paths.
+                Shape should be (n_steps, n_samples*N, (n_outputs - len(conditioned_by_processed))).
+                At leat, paths.size must be n_steps * n_samples * N * (n_outputs - len(conditioned_by_processed)).
+            n_steps (int): number of steps.
+            n_samples (int): number of samples.
+            conditioned_by_processed (Mapping[int, np.ndarray]): conditioned x.
+
+        Returns:
+            np.ndarray: postprocessed sample paths.
+                Shape: (n_steps, n_samples, N, n_outputs).
+        '''
+        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_ - len(conditioned_by_processed))  # noqa
+        # NOTE: The order of (..., -1, n_samples, ...) is based on np.repeat(X, n_samples, axis=0)  # noqa
+
+        if conditioned_by_processed:
+            map_dim_in_output_2_dim_in_x = {
+                # FIXME: it is inefficient to create this dictionary every time.
+                dio: i
+                for i, dio in enumerate([
+                    dio_ for dio_ in range(self.n_outputs_)
+                    if dio_ not in conditioned_by_processed
+                ])
+            }
+            # Attach conditioned x to the paths
+            paths = np.array([
+                np.hstack([
+                    conditioned_by_processed[c].reshape(-1, 1)
+                    if c in conditioned_by_processed else
+                    paths[step, :, :, map_dim_in_output_2_dim_in_x[c]].reshape(-1, 1)  # noqa
+                    for c in range(self.n_outputs_)
+                ])
+                for step in range(n_steps)
+            ]).reshape(n_steps, -1, n_samples, self.n_outputs_)
+
+        paths = paths.transpose(0, 2, 1, 3)
+        # NOTE: transponse it because the structure of the output is easier to use when the shape is (n_steps, n_samples, N, n_outputs)  # noqa
+
+        # validation
+        assert paths.shape == (n_steps, n_samples, paths.shape[2], self.n_outputs_), "Internal Error"  # noqa
+
+        return paths

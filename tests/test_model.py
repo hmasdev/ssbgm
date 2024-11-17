@@ -10,6 +10,7 @@ from ssbgm.model import (
 from ssbgm.utils import np_seed
 
 # TODO: test whether calling ScoreBasedGenerator.sample raises NotFittedError when ScoreBasedGenerator is not fitted  # noqa
+# TODO: test _postprocess_sample_paths
 
 DEFAULT_N_SAMPLES = 64
 
