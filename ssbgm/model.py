@@ -131,10 +131,12 @@ class ScoreBasedGenerator(BaseEstimator):
             # if y is not given, model learns the score function of X
             X, y = None, check_array(X, ensure_2d=False)  # type: ignore
             assert y is not None
+            self.require_X_ = False
         else:
             # if y is given, model learns the score function of y given X
             X, y = check_X_y(X, y, multi_output=True)
             assert y is not None
+            self.require_X_ = True
 
         # preprocess noise_strengths
         if noise_strengths is None:
@@ -292,14 +294,17 @@ class ScoreBasedGenerator(BaseEstimator):
         """  # noqa
 
         # validation
-        if init_sample is not None:
-            assert init_sample.ndim == 1 and init_sample.size == self.n_outputs_, f'init_sample must be (n_outputs,) shape array. But init_sample.shape = {init_sample.shape}'  # noqa
-        if X is None:
-            assert all([not isinstance(v, np.ndarray) for v in conditioned_by.values()]), f'conditioned_by must be Mapping[int, bool | int | float]. But conditioned_by = {conditioned_by}'  # noqa
-        else:
-            assert all([v.shape == (X.shape[0],) for v in conditioned_by.values() if isinstance(v, np.ndarray)]), f'the shape of a np.ndarray value of conditioned_by must be (X.shape[0],). But conditioned_by = {conditioned_by}'  # noqa
-        assert len(conditioned_by) < self.n_outputs_, f'conditioned_by must be less than n_outputs. But len(conditioned_by) >= {len(conditioned_by)}'  # noqa
-        assert all([0 <= k < self.n_outputs_ for k in conditioned_by.keys()]), f'the key of conditioned_by must be between 0 and n_outputs-1. But conditioned_by.keys() = {conditioned_by.keys()}'  # noqa
+        self._validate_kwargs_for_sample(
+            X=X,
+            n_samples=n_samples,
+            n_steps=n_steps,
+            init_sample=init_sample,
+            conditioned_by=conditioned_by,
+            return_paths=return_paths,
+            alpha=alpha,
+            sigma=sigma,
+            is_in_valid_domain_func=is_in_valid_domain_func,
+        )
 
         _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
 
@@ -484,13 +489,14 @@ class ScoreBasedGenerator(BaseEstimator):
                 (n_steps, n_samples, N, n_outputs) shape array if return_paths is True.
                 (n_samples, N, n_outputs) shape array if return_paths is False.
         """  # noqa
-
-        if X is None:
-            assert all([not isinstance(v, np.ndarray) for v in conditioned_by.values()]), f'conditioned_by must be Mapping[int, bool | int | float]. But conditioned_by = {conditioned_by}'  # noqa
-        else:
-            assert all([v.shape == (X.shape[0],) for v in conditioned_by.values() if isinstance(v, np.ndarray)]), f'the shape of a np.ndarray value of conditioned_by must be (X.shape[0],). But conditioned_by = {conditioned_by}'  # noqa
-        assert len(conditioned_by) < self.n_outputs_, f'conditioned_by must be less than n_outputs. But len(conditioned_by) >= {len(conditioned_by)}'  # noqa
-        assert all([0 <= k < self.n_outputs_ for k in conditioned_by.keys()]), f'the key of conditioned_by must be between 0 and n_outputs-1. But conditioned_by.keys() = {conditioned_by.keys()}'  # noqa
+        self._validate_kwargs_for_sample(
+            X=X,
+            n_samples=n_samples,
+            n_steps=n_steps,
+            init_sample=init_sample,
+            conditioned_by=conditioned_by,
+            return_paths=return_paths,
+        )
 
         _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
 
@@ -633,13 +639,14 @@ class ScoreBasedGenerator(BaseEstimator):
                 (n_step, n_samples, N, n_outputs) shape array if return_paths is True.
                 (n_samples, N, n_outputs) shape array if return_paths is False.
         """  # noqa
-
-        if X is None:
-            assert all([not isinstance(v, np.ndarray) for v in conditioned_by.values()]), f'conditioned_by must be Mapping[int, bool | int | float]. But conditioned_by = {conditioned_by}'  # noqa
-        else:
-            assert all([v.shape == (X.shape[0],) for v in conditioned_by.values() if isinstance(v, np.ndarray)]), f'the shape of a np.ndarray value of conditioned_by must be (X.shape[0],). But conditioned_by = {conditioned_by}'  # noqa
-        assert len(conditioned_by) < self.n_outputs_, f'conditioned_by must be less than n_outputs. But len(conditioned_by) >= {len(conditioned_by)}'  # noqa
-        assert all([0 <= k < self.n_outputs_ for k in conditioned_by.keys()]), f'the key of conditioned_by must be between 0 and n_outputs-1. But conditioned_by.keys() = {conditioned_by.keys()}'  # noqa
+        self._validate_kwargs_for_sample(
+            X=X,
+            n_samples=n_samples,
+            n_steps=n_steps,
+            init_sample=init_sample,
+            conditioned_by=conditioned_by,
+            return_paths=return_paths,
+        )
 
         _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
 
@@ -737,7 +744,7 @@ class ScoreBasedGenerator(BaseEstimator):
         init_sample: np.ndarray | None = None,
         conditioned_by: Mapping[int, bool | int | float | np.ndarray] = {},
         alpha: float = 0.1,  # only for langevin monte carlo
-        sigma: float | None = None,  # only for langevin monte carlo
+        sigma: Iterable[float] | float | None = None,  # only for langevin monte carlo  # noqa
         is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,  # only for langevin monte carlo # noqa
         seed: int | None = None,
     ) -> np.ndarray:
@@ -755,7 +762,7 @@ class ScoreBasedGenerator(BaseEstimator):
         init_sample: np.ndarray | None = None,
         conditioned_by: Mapping[int, bool | int | float] = {},
         alpha: float = 0.1,  # only for langevin monte carlo
-        sigma: float | None = None,  # only for langevin monte carlo
+        sigma: Iterable[float] | float | None = None,  # only for langevin monte carlo  # noqa
         is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,  # only for langevin monte carlo # noqa
         seed: int | None = None,
     ) -> np.ndarray:
@@ -772,7 +779,7 @@ class ScoreBasedGenerator(BaseEstimator):
         init_sample: np.ndarray | None = None,
         conditioned_by: Mapping[int, bool | int | float | np.ndarray] = {},
         alpha: float = 0.1,  # only for langevin monte carlo
-        sigma: float | None = None,  # only for langevin monte carlo
+        sigma: Iterable[float] | float | None = None,  # only for langevin monte carlo  # noqa
         is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,  # only for langevin monte carlo # noqa
         seed: int | None = None,
     ) -> np.ndarray:
@@ -886,3 +893,61 @@ class ScoreBasedGenerator(BaseEstimator):
         # predict the score function
         X_ = np.hstack([X,]+([] if y is None else [y])+[sigma.reshape(-1, 1)])
         return self.estimator_.predict(X_)  # type: ignore
+
+    def _validate_kwargs_for_sample(
+        self,
+        X: np.ndarray | None = None,
+        *,
+        n_samples: int = 1000,
+        sampling_method: SamplingMethod = SamplingMethod.LANGEVIN_MONTECARLO,
+        n_steps: int = 1000,
+        return_paths: bool = False,
+        init_sample: np.ndarray | None = None,
+        conditioned_by: Mapping[int, bool | int | float | np.ndarray] = {},
+        alpha: float = 0.1,  # only for langevin monte carlo
+        sigma: Iterable[float] | float | None = None,  # only for langevin monte carlo  # noqa
+        is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,  # only for langevin monte carlo # noqa
+    ) -> None:
+        # check X is valid
+        if self.require_X_ and X is None:
+            raise TypeError('X must be given because requires_X_ is True.')
+
+        # check n_samples
+        if n_samples <= 0:
+            raise ValueError(f'n_samples must be positive but n_samples = {n_samples}')  # noqa
+
+        # check sampling_method
+        # Nothing
+
+        # check n_steps
+        if n_steps <= 0:
+            raise ValueError(f'n_steps must be positive but n_steps = {n_steps}')  # noqa
+
+        # check return_paths
+        # Nothing
+
+        # check conditioned_by
+        if len(conditioned_by) >= self.n_outputs_:
+            raise ValueError(f'len(conditioned_by) must be less than n_outputs but len(conditioned_by) = {len(conditioned_by)} for n_outputs = {self.n_outputs_}.')  # noqa
+        if not all([0 <= k < self.n_outputs_ for k in conditioned_by.keys()]):
+            raise KeyError(f'the key of conditioned_by must be between 0 and n_outputs-1. But conditioned_by.keys() = {conditioned_by.keys()}')  # noqa
+        if X is None and not all([not isinstance(v, np.ndarray) for v in conditioned_by.values()]):  # noqa
+            raise TypeError(f'the value of conditioned_by must be bool, int, or float when X is None but conditioned_by = {conditioned_by}')  # noqa
+        elif X is not None and not all([v.shape == (X.shape[0],) for v in conditioned_by.values() if isinstance(v, np.ndarray)]):    # noqa
+            raise ValueError(f'the shape of a np.ndarray value of conditioned_by must be (X.shape[0],). But conditioned_by = {conditioned_by}')  # noqa
+
+        # check init_sample
+        if init_sample is not None:
+            if init_sample.ndim != 1 or init_sample.size != self.n_outputs_:  # noqa
+                raise ValueError(f'init_sample must be (n_outputs,) shape array. But init_sample.shape = {init_sample.shape}')  # noqa
+
+        # check alpha
+        if alpha <= 0:
+            raise ValueError(f'alpha must be positive but alpha = {alpha}')
+
+        # sigma
+        if sigma is not None:
+            if isinstance(sigma, Iterable) and not all([s > 0 for s in sigma]):
+                raise ValueError(f'all values of sigma must be positive but sigma = {sigma}')  # noqa
+            if (not isinstance(sigma, Iterable)) and sigma <= 0:
+                raise ValueError(f'sigma must be positive but sigma = {sigma}')
