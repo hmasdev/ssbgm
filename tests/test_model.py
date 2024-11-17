@@ -1318,3 +1318,37 @@ def test_ScoreBasedGenerator__preprocess_conditioned_by(
     actual = ScoreBasedGenerator._preprocess_conditioned_by(X, n_samples, conditioned_by)  # noqa
     for k, v in actual.items():
         np.testing.assert_array_equal(v, expected[k])
+
+
+@pytest.mark.parametrize(
+    'x,conditioned_by,expected',
+    [
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            {},
+            np.array([[1, 2], [3, 4], [5, 6]]),
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            {1: [[10], [20], [30]]},
+            np.array([[1, 10, 2], [3, 20, 4], [5, 30, 6]]),
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            {2: [[10], [20], [30]]},
+            np.array([[1, 2, 10], [3, 4, 20], [5, 6, 30]]),
+        ),
+    ]
+)
+def test_ScoreBasedGenerator__insert_conditiond_x_to_unconditioned_x(
+    x: np.ndarray,
+    conditioned_by: dict[int, int | np.ndarray],
+    expected: dict[int, int | np.ndarray],
+) -> None:
+    # TODO: test invalid inputs
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.n_outputs_ = x.shape[1] + len(conditioned_by)
+
+    actual = sbm._insert_conditiond_x_to_unconditioned_x(x, conditioned_by)
+
+    np.testing.assert_array_equal(actual, expected)

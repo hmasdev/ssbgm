@@ -312,25 +312,13 @@ class ScoreBasedGenerator(BaseEstimator):
 
         if X is None:
             def dU(x, sigma):
-                if conditioned_by_processed:
-                    x = np.hstack([
-                        conditioned_by_processed[c]
-                        if c in conditioned_by_processed else
-                        x[:, _col2idx[c]][:, np.newaxis]
-                        for c in range(self.n_outputs_)
-                    ])
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed)  # noqa
                 return - self.estimator_.predict(np.hstack([x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
         else:
             X = np.repeat(X, n_samples, axis=0)
 
             def dU(x, sigma):
-                if conditioned_by_processed:
-                    x = np.hstack([
-                        conditioned_by_processed[c]
-                        if c in conditioned_by_processed else
-                        x[:, _col2idx[c]][:, np.newaxis]
-                        for c in range(self.n_outputs_)
-                    ])
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed)  # noqa
                 return - self.estimator_.predict(np.hstack([X, x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
 
         if isinstance(sigma, (bool, int, float)):
@@ -473,25 +461,13 @@ class ScoreBasedGenerator(BaseEstimator):
 
         if X is None:
             def f(x, t):
-                if conditioned_by_processed:
-                    x = np.hstack([
-                        conditioned_by_processed[c]
-                        if c in conditioned_by_processed else
-                        x[:, _col2idx[c]][:, np.newaxis]
-                        for c in range(self.n_outputs_)
-                    ])
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed)  # noqa
                 return - 0.5 * self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
         else:
             X = np.repeat(X, n_samples, axis=0)
 
             def f(x, t):
-                if conditioned_by_processed:
-                    x = np.hstack([
-                        conditioned_by_processed[c]
-                        if c in conditioned_by_processed else
-                        x[:, _col2idx[c]][:, np.newaxis]
-                        for c in range(self.n_outputs_)
-                    ])
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed)  # noqa
                 return - 0.5 * self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
 
         paths = euler(
@@ -596,25 +572,13 @@ class ScoreBasedGenerator(BaseEstimator):
 
         if X is None:
             def f(x, t):
-                if conditioned_by_processed:
-                    x = np.hstack([
-                        conditioned_by_processed[c]
-                        if c in conditioned_by_processed else
-                        x[:, _col2idx[c]][:, np.newaxis]
-                        for c in range(self.n_outputs_)
-                    ])
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed)  # noqa
                 return - self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
         else:
             X = np.repeat(X, n_samples, axis=0)
 
             def f(x, t):
-                if conditioned_by_processed:
-                    x = np.hstack([
-                        conditioned_by_processed[c]
-                        if c in conditioned_by_processed else
-                        x[:, _col2idx[c]][:, np.newaxis]
-                        for c in range(self.n_outputs_)
-                    ])
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed)  # noqa
                 return - self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
 
         paths = euler_maruyama(
@@ -930,3 +894,37 @@ class ScoreBasedGenerator(BaseEstimator):
             for k, v in conditioned_by.items()
         }
         return preprocessed_conditioned_by
+
+    def _insert_conditiond_x_to_unconditioned_x(
+        self,
+        x: np.ndarray,
+        conditioned_by_processed: Mapping[int, np.ndarray],
+    ):
+        '''Insert conditioned x to unconditioned x
+
+        Args:
+            x (np.ndarray): unconditioned x.
+                Shape: (*, n_outputs - len(conditioned_by_processed)).
+            conditioned_by_processed (Mapping[int, np.ndarray]): conditioned x.
+                The shape of the value is (*, 1).
+
+        Returns:
+            np.ndarray: x with conditioned x.
+                Shape: (*, n_outputs).
+        '''  # noqa
+        if conditioned_by_processed:
+            map_dim_in_output_2_dim_in_x = {
+                # FIXME: it is inefficient to create this dictionary every time.
+                dio: i
+                for i, dio in enumerate([
+                    dio_ for dio_ in range(self.n_outputs_)
+                    if dio_ not in conditioned_by_processed
+                ])
+            }
+            x = np.hstack([
+                conditioned_by_processed[c]
+                if c in conditioned_by_processed else
+                x[:, [map_dim_in_output_2_dim_in_x[c]]]
+                for c in range(self.n_outputs_)
+            ])
+        return x
