@@ -916,7 +916,7 @@ class ScoreBasedGenerator(BaseEstimator):
         Returns:
             np.ndarray: postprocessed sample paths.
                 Shape: (n_steps, n_samples, N, n_outputs).
-        '''
+        '''  # noqa
         paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_ - len(conditioned_by_processed))  # noqa
         # NOTE: The order of (..., -1, n_samples, ...) is based on np.repeat(X, n_samples, axis=0)  # noqa
 
