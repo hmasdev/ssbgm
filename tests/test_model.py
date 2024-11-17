@@ -1,4 +1,5 @@
 from itertools import product
+from typing import Mapping
 import numpy as np
 import pytest
 from sklearn.linear_model import LinearRegression
@@ -6,8 +7,10 @@ from ssbgm.model import (
     create_noised_data,
     ScoreBasedGenerator,
 )
+from ssbgm.utils import np_seed
 
 # TODO: test whether calling ScoreBasedGenerator.sample raises NotFittedError when ScoreBasedGenerator is not fitted  # noqa
+# TODO: test _postprocess_sample_paths
 
 DEFAULT_N_SAMPLES = 64
 
@@ -179,14 +182,15 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions_with_cond
 
 
 @pytest.mark.parametrize(
-    'conditioned_by',
+    'conditioned_by,ExpectedException',
     [
-        {0: 1, 1: 2},
-        {3: 2},
+        ({0: 1, 1: 2}, ValueError),
+        ({3: 2}, KeyError),
     ]
 )
 def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions_with_invalid_conditioned_by(  # noqa
-    conditioned_by: dict[int, int]
+    conditioned_by: dict[int, int],
+    ExpectedException: type[Exception],
 ) -> None:
     X = np.array([[1, 2], [3, 4], [5, 6]])
     n_samples = DEFAULT_N_SAMPLES
@@ -194,7 +198,7 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_wo_conditions_with_inva
     sigma = 1e-4
     sbm = ScoreBasedGenerator(estimator=LinearRegression())
     sbm.fit(X)
-    with pytest.raises(AssertionError):
+    with pytest.raises(ExpectedException):
         sbm._sample_langenvin_montecarlo(
             n_samples=n_samples,
             alpha=alpha,
@@ -410,14 +414,15 @@ def test_ScoreBasedGenerator__sample_euler_wo_conditions_with_conditioned_by() -
 
 
 @pytest.mark.parametrize(
-    'conditioned_by',
+    'conditioned_by,ExpectedException',
     [
-        {0: 1, 1: 2},
-        {3: 2},
+        ({0: 1, 1: 2}, ValueError),
+        ({3: 2}, KeyError),
     ]
 )
 def test_ScoreBasedGenerator__sample_euler_wo_conditions_with_invalid_conditioned_by(  # noqa
-    conditioned_by: dict[int, int]
+    conditioned_by: dict[int, int],
+    ExpectedException: type[Exception],
 ) -> None:
 
     X = np.array([[1, 2], [3, 4], [5, 6]])
@@ -426,7 +431,7 @@ def test_ScoreBasedGenerator__sample_euler_wo_conditions_with_invalid_conditione
     sbm = ScoreBasedGenerator(estimator=LinearRegression())
     sbm.fit(X)
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(ExpectedException):
         sbm._sample_euler(
             n_samples=n_samples,
             n_steps=n_steps,
@@ -608,14 +613,15 @@ def test_ScoreBasedGenerator__sample_euler_maruyama_wo_conditions_with_condition
 
 
 @pytest.mark.parametrize(
-    'conditioned_by',
+    'conditioned_by,ExpectedException',
     [
-        {0: 1, 1: 2},
-        {3: 2},
+        ({0: 1, 1: 2}, ValueError),
+        ({3: 2}, KeyError),
     ]
 )
 def test_ScoreBasedGenerator__sample_euler_maruyama_wo_conditions_with_invalid_conditioned_by(  # noqa
-    conditioned_by: dict[int, int]
+    conditioned_by: dict[int, int],
+    ExpectedException: type[Exception],
 ) -> None:
 
     X = np.array([[1, 2], [3, 4], [5, 6]])
@@ -624,7 +630,7 @@ def test_ScoreBasedGenerator__sample_euler_maruyama_wo_conditions_with_invalid_c
     sbm = ScoreBasedGenerator(estimator=LinearRegression())
     sbm.fit(X)
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(ExpectedException):
         sbm._sample_euler_maruyama(
             n_samples=n_samples,
             n_steps=n_steps,
@@ -921,3 +927,429 @@ def test_ScoreBasedGenerator_predict_score_w_conditions(
         assert score.shape == y.shape[:1]
     else:
         assert score.shape == y.shape
+
+
+@pytest.mark.parametrize(
+    'fit_kwargs,kwargs,expected_exception_cls',
+    [
+        (
+            # Default case is passed
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': None,
+            },
+            {},
+            None,  # None means that no exception is expected
+        ),
+        (
+            # Case: X is not given to _validate_kwargs_for_sample when y is given  # noqa
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': np.array([0, 1, 0]),
+            },
+            {
+                'X': None,
+            },
+            TypeError,
+        ),
+        (
+            # Case: n_samples is 0
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': None,
+            },
+            {
+                'n_samples': 0,
+            },
+            ValueError,
+        ),
+        (
+            # Case: n_samples is negative
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': None,
+            },
+            {
+                'n_samples': -1,
+            },
+            ValueError,
+        ),
+        (
+            # Case: n_steps is 0
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': None,
+            },
+            {
+                'n_steps': 0,
+            },
+            ValueError,
+        ),
+        (
+            # Case: n_steps is negative
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': None,
+            },
+            {
+                'n_steps': -1,
+            },
+            ValueError,
+        ),
+        (
+            # Case: the size of conditioned_by is equal to the expected output
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': None,
+            },
+            {
+                'conditioned_by': {0: 1, 1: 2},
+            },
+            ValueError,
+        ),
+        (
+            # Case: conditioned_by is larger than the expected output
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': None,
+            },
+            {
+                'conditioned_by': {0: 1, 1: 2, 2: 3},
+            },
+            ValueError,
+        ),
+        (
+            # Case: conditioned_by has invalid keys
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': None,
+            },
+            {
+                'conditioned_by': {-1: 1},
+            },
+            KeyError,
+        ),
+        (
+            # Case: the value of conditioned_by is np.ndarray when X is None
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': None,
+            },
+            {
+                'conditioned_by': {0: np.array([1, 2, 3])},
+            },
+            TypeError,
+        ),
+        (
+            # Case: the shape of a np.ndarray value of conditioned_by is not (X.shape[0], )  # noqa
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': np.array([[1, 2], [3, 4], [5, 6]]),
+            },
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),  # NOTE: X.shape[0] is 3  # noqa
+                'conditioned_by': {0: np.array([1, 2,])},  # NOTE: conditioned_by[0].shape[0] is 2  # noqa
+            },
+            ValueError,
+        ),
+        (
+            # Case: the shape of init_sample is not (n_outputs_, )
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),  # NOTE: n_outputs_ is 2  # noqa
+                'y': None,
+            },
+            {
+                'init_sample': np.array([1, 2, 3]),
+            },
+            ValueError,
+        ),
+        (
+            # Case: the shape of init_sample is not (n_outputs_, )
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),  # NOTE: n_outputs_ is 2  # noqa
+                'y': None,
+            },
+            {
+                'init_sample': np.array([[1, 2], [3, 4], [5, 6]]),
+            },
+            ValueError,
+        ),
+        (
+            # Case: alpha is 0
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': None,
+            },
+            {
+                'alpha': 0,
+            },
+            ValueError,
+        ),
+        (
+            # Case: alpha is negative
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': None,
+            },
+            {
+                'alpha': -1,
+            },
+            ValueError,
+        ),
+        (
+            # Case: When sigma is an iterable of float, but it contains 0
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': None,
+            },
+            {
+                'sigma': [0, 0.1],
+            },
+            ValueError,
+        ),
+        (
+            # Case: When sigma is an iterable of float, but it contains a negative value  # noqa
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': None,
+            },
+            {
+                'sigma': [-1, 0.1],
+            },
+            ValueError,
+        ),
+        (
+            # Case: sigma is 0
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': None,
+            },
+            {
+                'sigma': 0,
+            },
+            ValueError,
+        ),
+        (
+            # Case: sigma is negative
+            {
+                'X': np.array([[1, 2], [3, 4], [5, 6]]),
+                'y': None,
+            },
+            {
+                'sigma': -1,
+            },
+            ValueError,
+        )
+    ]
+)
+def test_ScoreBasedGenerator__validate_kwargs_for_sample(
+    fit_kwargs: dict[str, np.ndarray | None],
+    kwargs: dict[str, object],
+    expected_exception_cls: type[Exception] | None
+) -> None:
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.fit(**fit_kwargs)  # type: ignore
+    if expected_exception_cls:
+        with pytest.raises(expected_exception_cls):
+            sbm._validate_kwargs_for_sample(**kwargs)  # type: ignore
+    else:
+        sbm._validate_kwargs_for_sample(**kwargs)  # type: ignore
+
+
+@pytest.mark.parametrize(
+    'Xtr,ytr,X,n_samples,init_sample,conditioned_by',
+    [
+        # Requires ytr and X
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([0, 1, 0]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            10,
+            None,  # init_sample is None
+            {},  # conditioned_by is empty
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            10,
+            np.array([1, 2]),
+            {},  # conditioned_by is empty
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            10,
+            None,  # init_sample is None
+            {0: 1},  # conditioned_by is not empty
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            10,
+            np.array([1, 2]),
+            {0: 1},  # conditioned_by is not empty
+        ),
+        # Does not require ytr and X
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            None,
+            None,
+            10,
+            None,  # init_sample is None
+            {},  # conditioned_by is empty
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            None,
+            None,
+            10,
+            np.array([1, 2]),
+            {},  # conditioned_by is empty
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            None,
+            None,
+            10,
+            None,  # init_sample is None
+            {0: 1},  # conditioned_by is not empty
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            None,
+            None,
+            10,
+            np.array([1, 2]),
+            {0: 1},  # conditioned_by is not empty
+        ),
+    ]
+)
+def test_ScoreBasedGenerator__initialize_samples(
+    Xtr: np.ndarray,
+    ytr: np.ndarray | None,
+    X: np.ndarray | None,
+    n_samples: int,
+    init_sample: np.ndarray | None,
+    conditioned_by: Mapping[int, bool | int | float | np.ndarray],
+) -> None:
+    # TODO: Test with invalid inputs
+
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.fit(Xtr, ytr)
+    with np_seed(0):
+        x0 = sbm._initialize_samples(
+            X=X,
+            n_samples=n_samples,
+            init_sample=init_sample,
+            conditioned_by=conditioned_by,
+        )
+
+    # check shape
+    N = 1 if X is None else X.shape[0]
+    n_outputs = sbm.n_outputs_
+    assert n_samples > 0
+    assert N > 0
+    assert n_outputs - len(conditioned_by) > 0
+    assert x0.shape == (n_samples * N, n_outputs - len(conditioned_by))
+
+    # check random
+    if init_sample is None:
+        # randomly generated
+        assert np.any(x0 != x0.mean())
+    else:
+        # initialized by init_sample
+        init_sample_ = init_sample[[i for i in range(n_outputs) if i not in conditioned_by]]  # noqa
+        assert np.all(x0 == np.repeat(init_sample_[np.newaxis, :], n_samples * N, axis=0))  # noqa
+
+
+@pytest.mark.parametrize(
+    'X,n_samples,conditioned_by,expected',
+    [
+        (
+            None,
+            3,
+            {},
+            {},
+        ),
+        (
+            None,
+            3,  # =: n_samples
+            {0: 1},
+            {0: np.array([[1], [1], [1]])},  # Shape: (n_samples, 1)
+        ),
+        (
+            np.array([[1, 2], [3, 4]]),
+            3,
+            {},
+            {},
+        ),
+        (
+            np.array([[1, 2], [3, 4]]),  # N = 2
+            3,  # =: n_samples
+            {0: 1},
+            {0: np.array([[1], [1], [1], [1], [1], [1]])},  # Shape: (N * n_samples, 1)  # noqa
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),  # N = 3
+            2,  # =: n_samples
+            {0: np.array([1, 2, 3])},
+            {0: np.array([[1], [1], [2], [2], [3], [3]])},  # Shape: (N * n_samples, 1)  # noqa
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),  # N = 3
+            2,  # =: n_samples
+            {0: np.array([1, 2, 3]), 1: 1},
+            {
+                0: np.array([[1], [1], [2], [2], [3], [3]]),
+                1: np.array([[1], [1], [1], [1], [1], [1]]),
+            },  # noqa
+        )
+
+    ]
+)
+def test_ScoreBasedGenerator__preprocess_conditioned_by(
+    X: np.ndarray | None,
+    n_samples: int,
+    conditioned_by: dict[int, int | np.ndarray],
+    expected: dict[int, np.ndarray],
+) -> None:
+    actual = ScoreBasedGenerator._preprocess_conditioned_by(X, n_samples, conditioned_by)  # noqa
+    for k, v in actual.items():
+        np.testing.assert_array_equal(v, expected[k])
+
+
+@pytest.mark.parametrize(
+    'x,conditioned_by,expected',
+    [
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            {},
+            np.array([[1, 2], [3, 4], [5, 6]]),
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            {1: np.array([[10], [20], [30]])},
+            np.array([[1, 10, 2], [3, 20, 4], [5, 30, 6]]),
+        ),
+        (
+            np.array([[1, 2], [3, 4], [5, 6]]),
+            {2: np.array([[10], [20], [30]])},
+            np.array([[1, 2, 10], [3, 4, 20], [5, 6, 30]]),
+        ),
+    ]
+)
+def test_ScoreBasedGenerator__insert_conditiond_x_to_unconditioned_x(
+    x: np.ndarray,
+    conditioned_by: Mapping[int, np.ndarray],
+    expected: np.ndarray,
+) -> None:
+    # TODO: test invalid inputs
+    sbm = ScoreBasedGenerator(estimator=LinearRegression())
+    sbm.n_outputs_ = x.shape[1] + len(conditioned_by)
+
+    actual = sbm._insert_conditiond_x_to_unconditioned_x(x, conditioned_by)
+
+    np.testing.assert_array_equal(actual, expected)

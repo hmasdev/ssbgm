@@ -131,10 +131,12 @@ class ScoreBasedGenerator(BaseEstimator):
             # if y is not given, model learns the score function of X
             X, y = None, check_array(X, ensure_2d=False)  # type: ignore
             assert y is not None
+            self.require_X_ = False
         else:
             # if y is given, model learns the score function of y given X
             X, y = check_X_y(X, y, multi_output=True)
             assert y is not None
+            self.require_X_ = True
 
         # preprocess noise_strengths
         if noise_strengths is None:
@@ -292,101 +294,67 @@ class ScoreBasedGenerator(BaseEstimator):
         """  # noqa
 
         # validation
-        if init_sample is not None:
-            assert init_sample.ndim == 1 and init_sample.size == self.n_outputs_, f'init_sample must be (n_outputs,) shape array. But init_sample.shape = {init_sample.shape}'  # noqa
-        if X is None:
-            assert all([not isinstance(v, np.ndarray) for v in conditioned_by.values()]), f'conditioned_by must be Mapping[int, bool | int | float]. But conditioned_by = {conditioned_by}'  # noqa
-        else:
-            assert all([v.shape == (X.shape[0],) for v in conditioned_by.values() if isinstance(v, np.ndarray)]), f'the shape of a np.ndarray value of conditioned_by must be (X.shape[0],). But conditioned_by = {conditioned_by}'  # noqa
-        assert len(conditioned_by) < self.n_outputs_, f'conditioned_by must be less than n_outputs. But len(conditioned_by) >= {len(conditioned_by)}'  # noqa
-        assert all([0 <= k < self.n_outputs_ for k in conditioned_by.keys()]), f'the key of conditioned_by must be between 0 and n_outputs-1. But conditioned_by.keys() = {conditioned_by.keys()}'  # noqa
+        self._validate_kwargs_for_sample(
+            X=X,
+            n_samples=n_samples,
+            n_steps=n_steps,
+            init_sample=init_sample,
+            conditioned_by=conditioned_by,
+            return_paths=return_paths,
+            alpha=alpha,
+            sigma=sigma,
+            is_in_valid_domain_func=is_in_valid_domain_func,
+        )
 
+        # preparation
         _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
+        _vals_of_col2idx = sorted(_col2idx.values())
+        x0 = self._initialize_samples(X, n_samples, init_sample, conditioned_by)  # noqa
+        conditioned_by_processed = self._preprocess_conditioned_by(X, n_samples, conditioned_by)  # noqa
 
+        # define the gradient of the potential energy function
         if X is None:
-            # x: (n_samples, n_outputs)
-            if init_sample is not None:
-                x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*n_samples)  # noqa
-            else:
-                x0 = np.random.randn(n_samples, self.n_outputs_) * max(self.noise_strengths_)  # noqa
-
-            conditioned_by_processed = {
-                k: np.array([[v]]*n_samples)
-                for k, v in conditioned_by.items()
-            }
-
             def dU(x, sigma):
-                if conditioned_by_processed:
-                    x = np.hstack([
-                        conditioned_by_processed[c]
-                        if c in conditioned_by_processed else
-                        x[:, _col2idx[c]][:, np.newaxis]
-                        for c in range(self.n_outputs_)
-                    ])
-                return - self.estimator_.predict(np.hstack([x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
+                return - self.estimator_.predict(np.hstack([x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, _vals_of_col2idx]  # noqa
         else:
-            # x: (n_samples * N, n_outputs)
-            if init_sample is not None:
-                if init_sample.size == self.n_outputs_:
-                    x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*X.shape[0]*n_samples)  # noqa
-                else:
-                    assert init_sample.shape == (X.shape[0], self.n_outputs_)
-                    x0 = np.repeat(init_sample, n_samples, axis=0)
-            else:
-                x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
-
-            conditioned_by_processed = {
-                k: (
-                    np.repeat(v, n_samples, axis=0)[:, np.newaxis]
-                    if isinstance(v, np.ndarray) else
-                    np.array([[v]]*X.shape[0]*n_samples)
-                )
-                for k, v in conditioned_by.items()
-            }
-
             X = np.repeat(X, n_samples, axis=0)
 
             def dU(x, sigma):
-                if conditioned_by_processed:
-                    x = np.hstack([
-                        conditioned_by_processed[c]
-                        if c in conditioned_by_processed else
-                        x[:, _col2idx[c]][:, np.newaxis]
-                        for c in range(self.n_outputs_)
-                    ])
-                return - self.estimator_.predict(np.hstack([X, x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
+                return - self.estimator_.predict(np.hstack([X, x, np.array([[sigma]]*len(x))])).reshape(*x.shape)[:, _vals_of_col2idx]  # noqa
 
-        if conditioned_by:
-            x0 = x0[:, [i for i in range(self.n_outputs_) if i not in conditioned_by.keys()]]  # noqa
-
-        if isinstance(sigma, (bool, int, float)):
-            sigmas = None
+        # decrease the noise strength step by step
+        sigmas: Iterable[float]
+        if isinstance(sigma, Iterable):
+            sigmas = sorted(sigma)[::-1][:-1]
+            sigma = min(sigma)
         elif sigma is None:
             sigmas = sorted(self.noise_strengths_)[::-1]
+            sigma = min(self.noise_strengths_)
         else:
-            sigmas = sorted(sigma)[::-1]
-        if sigmas is not None:
-            for sigma in sigmas:
-                # NOTE: decrease the noise strength step by step
-                x0 = langevin_montecarlo(
-                    x0=x0,
-                    nabla_U=partial(dU, sigma=sigma),
-                    n_steps=n_steps,
-                    delta_t=alpha,
-                    pdf=(lambda x: self._large_value * is_in_valid_domain_func(x)) if is_in_valid_domain_func is not None else None,  # noqa
-                    # NOTE:
-                    # is_in_valid_domain_func is not a valid probability density function.  # noqa
-                    # But is_in_valid_domain_func is used for the purpose of filtering out invalid values  # noqa
-                    # FIXME:
-                    # self.large_value is multiplied to pdf to avoid unexpected rejection.  # noqa
-                    # MALA use the min(1, (pdf(z_k^l) q(x_{k-1}|z_k^l)) / (pdf(x_{k-1}) q(z_k^l|x_{k-1}))).  # noqa
-                    # So, there is a pair of (z_k^l, x_{k-1}) that both are in the valid domain but z_k^l is rejected.  # noqa
-                    # To avoid this, the large value is multiplied to pdf.
-                    use_pdf_as_domain_indicator=True,
-                    verbose=self.verbose,
-                )[-1]
+            sigmas = []
+            sigma = float(sigma)
+        for sigma_ in sigmas:
+            # NOTE: decrease the noise strength step by step
+            x0 = langevin_montecarlo(
+                x0=x0,
+                nabla_U=partial(dU, sigma=sigma_),
+                n_steps=n_steps,
+                delta_t=alpha,
+                pdf=(lambda x: self._large_value * is_in_valid_domain_func(x)) if is_in_valid_domain_func is not None else None,  # noqa
+                # NOTE:
+                # is_in_valid_domain_func is not a valid probability density function.  # noqa
+                # But is_in_valid_domain_func is used for the purpose of filtering out invalid values  # noqa
+                # FIXME:
+                # self.large_value is multiplied to pdf to avoid unexpected rejection.  # noqa
+                # MALA use the min(1, (pdf(z_k^l) q(x_{k-1}|z_k^l)) / (pdf(x_{k-1}) q(z_k^l|x_{k-1}))).  # noqa
+                # So, there is a pair of (z_k^l, x_{k-1}) that both are in the valid domain but z_k^l is rejected.  # noqa
+                # To avoid this, the large value is multiplied to pdf.
+                use_pdf_as_domain_indicator=True,
+                verbose=self.verbose,
+            )[-1]
 
-        # Output: (n_samples, N, n_outputs)
         paths = langevin_montecarlo(
             x0=x0,
             nabla_U=partial(dU, sigma=sigma),
@@ -404,23 +372,7 @@ class ScoreBasedGenerator(BaseEstimator):
             use_pdf_as_domain_indicator=True,
             verbose=self.verbose,
         )
-        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_ - len(conditioned_by_processed))  # noqa
-        # NOTE: The order of (-1, n_samples) is based on np.repeat(X, n_samples, axis=0)  # noqa
-
-        if conditioned_by_processed:
-            paths = np.array([
-                np.hstack([
-                    conditioned_by_processed[c].reshape(-1, 1)
-                    if c in conditioned_by_processed else
-                    paths[step, :, :, _col2idx[c]].reshape(-1, 1)
-                    for c in range(self.n_outputs_)
-                ])
-                for step in range(n_steps)
-            ]).reshape(n_steps, -1, n_samples, self.n_outputs_)
-
-        paths = paths.transpose(0, 2, 1, 3)
-        assert paths.shape == (n_steps, n_samples, paths.shape[2], self.n_outputs_)  # noqa
-        # NOTE: transponse it because the structure of the output is easier to use when the shape is (n_steps, n_samples, N, n_outputs)  # noqa
+        paths = self._postprocess_sample_paths(paths, n_steps, n_samples, conditioned_by_processed, _col2idx)  # noqa
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
         return paths if return_paths else paths[-1]
@@ -484,68 +436,32 @@ class ScoreBasedGenerator(BaseEstimator):
                 (n_steps, n_samples, N, n_outputs) shape array if return_paths is True.
                 (n_samples, N, n_outputs) shape array if return_paths is False.
         """  # noqa
-
-        if X is None:
-            assert all([not isinstance(v, np.ndarray) for v in conditioned_by.values()]), f'conditioned_by must be Mapping[int, bool | int | float]. But conditioned_by = {conditioned_by}'  # noqa
-        else:
-            assert all([v.shape == (X.shape[0],) for v in conditioned_by.values() if isinstance(v, np.ndarray)]), f'the shape of a np.ndarray value of conditioned_by must be (X.shape[0],). But conditioned_by = {conditioned_by}'  # noqa
-        assert len(conditioned_by) < self.n_outputs_, f'conditioned_by must be less than n_outputs. But len(conditioned_by) >= {len(conditioned_by)}'  # noqa
-        assert all([0 <= k < self.n_outputs_ for k in conditioned_by.keys()]), f'the key of conditioned_by must be between 0 and n_outputs-1. But conditioned_by.keys() = {conditioned_by.keys()}'  # noqa
-
+        # validation
+        self._validate_kwargs_for_sample(
+            X=X,
+            n_samples=n_samples,
+            n_steps=n_steps,
+            init_sample=init_sample,
+            conditioned_by=conditioned_by,
+            return_paths=return_paths,
+        )
+        # preparation
         _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
-
+        _vals_of_col2idx = sorted(_col2idx.values())
+        x0 = self._initialize_samples(X, n_samples, init_sample, conditioned_by)  # noqa
+        conditioned_by_processed = self._preprocess_conditioned_by(X, n_samples, conditioned_by)  # noqa
+        # define ODE
         if X is None:
-            # x: (n_samples, n_outputs)
-            if init_sample is not None:
-                x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*n_samples)  # noqa
-            else:
-                x0 = np.random.randn(n_samples, self.n_outputs_) * max(self.noise_strengths_)  # noqa
-
-            conditioned_by_processed = {
-                k: np.array([[v]]*n_samples)
-                for k, v in conditioned_by.items()
-            }
-
             def f(x, t):
-                if conditioned_by_processed:
-                    x = np.hstack([
-                        conditioned_by_processed[c]
-                        if c in conditioned_by_processed else
-                        x[:, _col2idx[c]][:, np.newaxis]
-                        for c in range(self.n_outputs_)
-                    ])
-                return - 0.5 * self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
+                return - 0.5 * self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, _vals_of_col2idx]  # noqa
         else:
-            # x: (n_samples * N, n_outputs)
-            if init_sample is not None:
-                x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*X.shape[0]*n_samples)  # noqa
-            else:
-                x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
-
-            conditioned_by_processed = {
-                k: (
-                    np.repeat(v, n_samples, axis=0)[:, np.newaxis]
-                    if isinstance(v, np.ndarray) else
-                    np.array([[v]]*X.shape[0]*n_samples)
-                )
-                for k, v in conditioned_by.items()
-            }
-
             X = np.repeat(X, n_samples, axis=0)
 
             def f(x, t):
-                if conditioned_by_processed:
-                    x = np.hstack([
-                        conditioned_by_processed[c]
-                        if c in conditioned_by_processed else
-                        x[:, _col2idx[c]][:, np.newaxis]
-                        for c in range(self.n_outputs_)
-                    ])
-                return - 0.5 * self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
-
-        if conditioned_by:
-            x0 = x0[:, [i for i in range(self.n_outputs_) if i not in conditioned_by.keys()]]  # noqa
-
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
+                return - 0.5 * self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, _vals_of_col2idx]  # noqa
+        # generate samples
         paths = euler(
             x0=x0,
             f=f,
@@ -554,23 +470,7 @@ class ScoreBasedGenerator(BaseEstimator):
             n_steps=n_steps,
             verbose=self.verbose,
         )[1]
-        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_ - len(conditioned_by_processed))  # noqa
-        # NOTE: The order of (-1, n_samples) is based on np.repeat(X, n_samples, axis=0)  # noqa
-
-        if conditioned_by_processed:
-            paths = np.array([
-                np.hstack([
-                    conditioned_by_processed[c].reshape(-1, 1)
-                    if c in conditioned_by_processed else
-                    paths[step, :, :, _col2idx[c]].reshape(-1, 1)
-                    for c in range(self.n_outputs_)
-                ])
-                for step in range(n_steps)
-            ]).reshape(n_steps, -1, n_samples, self.n_outputs_)
-
-        paths = paths.transpose(0, 2, 1, 3)
-        # NOTE: transponse it because the structure of the output is easier to use when the shape is (n_steps, n_samples, N, n_outputs)  # noqa
-        assert paths.shape == (n_steps, n_samples, paths.shape[2], self.n_outputs_)  # noqa
+        paths = self._postprocess_sample_paths(paths, n_steps, n_samples, conditioned_by_processed, _col2idx)  # noqa
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
         return paths if return_paths else paths[-1]
@@ -633,68 +533,32 @@ class ScoreBasedGenerator(BaseEstimator):
                 (n_step, n_samples, N, n_outputs) shape array if return_paths is True.
                 (n_samples, N, n_outputs) shape array if return_paths is False.
         """  # noqa
-
-        if X is None:
-            assert all([not isinstance(v, np.ndarray) for v in conditioned_by.values()]), f'conditioned_by must be Mapping[int, bool | int | float]. But conditioned_by = {conditioned_by}'  # noqa
-        else:
-            assert all([v.shape == (X.shape[0],) for v in conditioned_by.values() if isinstance(v, np.ndarray)]), f'the shape of a np.ndarray value of conditioned_by must be (X.shape[0],). But conditioned_by = {conditioned_by}'  # noqa
-        assert len(conditioned_by) < self.n_outputs_, f'conditioned_by must be less than n_outputs. But len(conditioned_by) >= {len(conditioned_by)}'  # noqa
-        assert all([0 <= k < self.n_outputs_ for k in conditioned_by.keys()]), f'the key of conditioned_by must be between 0 and n_outputs-1. But conditioned_by.keys() = {conditioned_by.keys()}'  # noqa
-
+        # validation
+        self._validate_kwargs_for_sample(
+            X=X,
+            n_samples=n_samples,
+            n_steps=n_steps,
+            init_sample=init_sample,
+            conditioned_by=conditioned_by,
+            return_paths=return_paths,
+        )
+        # preparation
         _col2idx = {c: i for i, c in enumerate([c_ for c_ in range(self.n_outputs_) if c_ not in conditioned_by.keys()])}  # noqa
-
+        _vals_of_col2idx = sorted(_col2idx.values())
+        x0 = self._initialize_samples(X, n_samples, init_sample, conditioned_by)  # noqa
+        conditioned_by_processed = self._preprocess_conditioned_by(X, n_samples, conditioned_by)  # noqa
+        # define SDE
         if X is None:
-            # x: (n_samples, n_outputs)
-            if init_sample is not None:
-                x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*n_samples)  # noqa
-            else:
-                x0 = np.random.randn(n_samples, self.n_outputs_) * max(self.noise_strengths_)  # noqa
-
-            conditioned_by_processed = {
-                k: np.array([[v]]*n_samples)
-                for k, v in conditioned_by.items()
-            }
-
             def f(x, t):
-                if conditioned_by_processed:
-                    x = np.hstack([
-                        conditioned_by_processed[c]
-                        if c in conditioned_by_processed else
-                        x[:, _col2idx[c]][:, np.newaxis]
-                        for c in range(self.n_outputs_)
-                    ])
-                return - self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
+                return - self.estimator_.predict(np.hstack([x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, _vals_of_col2idx]  # noqa
         else:
-            # x: (n_samples * N, n_outputs)
-            if init_sample is not None:
-                x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*X.shape[0]*n_samples)  # noqa
-            else:
-                x0 = np.random.randn(n_samples * X.shape[0], self.n_outputs_)*max(self.noise_strengths_)  # noqa
-
-            conditioned_by_processed = {
-                k: (
-                    np.repeat(v, n_samples, axis=0)[:, np.newaxis]
-                    if isinstance(v, np.ndarray) else
-                    np.array([[v]]*X.shape[0]*n_samples)
-                )
-                for k, v in conditioned_by.items()
-            }
-
             X = np.repeat(X, n_samples, axis=0)
 
             def f(x, t):
-                if conditioned_by_processed:
-                    x = np.hstack([
-                        conditioned_by_processed[c]
-                        if c in conditioned_by_processed else
-                        x[:, _col2idx[c]][:, np.newaxis]
-                        for c in range(self.n_outputs_)
-                    ])
-                return - self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, sorted(_col2idx.values())]  # noqa
-
-        if conditioned_by:
-            x0 = x0[:, [i for i in range(self.n_outputs_) if i not in conditioned_by.keys()]]  # noqa
-
+                x = self._insert_conditiond_x_to_unconditioned_x(x, conditioned_by_processed, _col2idx)  # noqa
+                return - self.estimator_.predict(np.hstack([X, x, np.array([[np.sqrt(t)]]*len(x))])).reshape(*x.shape)[:, _vals_of_col2idx]  # noqa
+        # generate samples
         paths = euler_maruyama(
             x0=x0,
             f=f,
@@ -704,23 +568,7 @@ class ScoreBasedGenerator(BaseEstimator):
             n_steps=n_steps,
             verbose=self.verbose,
         )[1]
-        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_ - len(conditioned_by_processed))  # noqa
-        # NOTE: The order of (-1, n_samples) is based on np.repeat(X, n_samples, axis=0)  # noqa
-
-        if conditioned_by_processed:
-            paths = np.array([
-                np.hstack([
-                    conditioned_by_processed[c].reshape(-1, 1)
-                    if c in conditioned_by_processed else
-                    paths[step, :, :, _col2idx[c]].reshape(-1, 1)
-                    for c in range(self.n_outputs_)
-                ])
-                for step in range(n_steps)
-            ]).reshape(n_steps, -1, n_samples, self.n_outputs_)
-
-        paths = paths.transpose(0, 2, 1, 3)
-        # NOTE: transponse it because the structure of the output is easier to use when the shape is (n_steps, n_samples, N, n_outputs)  # noqa
-        assert paths.shape == (n_steps, n_samples, paths.shape[2], self.n_outputs_)  # noqa
+        paths = self._postprocess_sample_paths(paths, n_steps, n_samples, conditioned_by_processed, _col2idx)  # noqa
 
         # Output: (n_steps, n_samples, N, n_outputs) if return_paths else (n_samples, N, n_outputs)  # noqa
         return paths if return_paths else paths[-1]
@@ -737,7 +585,7 @@ class ScoreBasedGenerator(BaseEstimator):
         init_sample: np.ndarray | None = None,
         conditioned_by: Mapping[int, bool | int | float | np.ndarray] = {},
         alpha: float = 0.1,  # only for langevin monte carlo
-        sigma: float | None = None,  # only for langevin monte carlo
+        sigma: Iterable[float] | float | None = None,  # only for langevin monte carlo  # noqa
         is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,  # only for langevin monte carlo # noqa
         seed: int | None = None,
     ) -> np.ndarray:
@@ -755,7 +603,7 @@ class ScoreBasedGenerator(BaseEstimator):
         init_sample: np.ndarray | None = None,
         conditioned_by: Mapping[int, bool | int | float] = {},
         alpha: float = 0.1,  # only for langevin monte carlo
-        sigma: float | None = None,  # only for langevin monte carlo
+        sigma: Iterable[float] | float | None = None,  # only for langevin monte carlo  # noqa
         is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,  # only for langevin monte carlo # noqa
         seed: int | None = None,
     ) -> np.ndarray:
@@ -772,7 +620,7 @@ class ScoreBasedGenerator(BaseEstimator):
         init_sample: np.ndarray | None = None,
         conditioned_by: Mapping[int, bool | int | float | np.ndarray] = {},
         alpha: float = 0.1,  # only for langevin monte carlo
-        sigma: float | None = None,  # only for langevin monte carlo
+        sigma: Iterable[float] | float | None = None,  # only for langevin monte carlo  # noqa
         is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,  # only for langevin monte carlo # noqa
         seed: int | None = None,
     ) -> np.ndarray:
@@ -886,3 +734,216 @@ class ScoreBasedGenerator(BaseEstimator):
         # predict the score function
         X_ = np.hstack([X,]+([] if y is None else [y])+[sigma.reshape(-1, 1)])
         return self.estimator_.predict(X_)  # type: ignore
+
+    # Utilities
+
+    def _validate_kwargs_for_sample(
+        self,
+        X: np.ndarray | None = None,
+        *,
+        n_samples: int = 1000,
+        sampling_method: SamplingMethod = SamplingMethod.LANGEVIN_MONTECARLO,
+        n_steps: int = 1000,
+        return_paths: bool = False,
+        init_sample: np.ndarray | None = None,
+        conditioned_by: Mapping[int, bool | int | float | np.ndarray] = {},
+        alpha: float = 0.1,  # only for langevin monte carlo
+        sigma: Iterable[float] | float | None = None,  # only for langevin monte carlo  # noqa
+        is_in_valid_domain_func: Callable[[np.ndarray], bool] | None = None,  # only for langevin monte carlo # noqa
+    ) -> None:
+        # check X is valid
+        if self.require_X_ and X is None:
+            raise TypeError('X must be given because requires_X_ is True.')
+
+        # check n_samples
+        if n_samples <= 0:
+            raise ValueError(f'n_samples must be positive but n_samples = {n_samples}')  # noqa
+
+        # check sampling_method
+        # Nothing
+
+        # check n_steps
+        if n_steps <= 0:
+            raise ValueError(f'n_steps must be positive but n_steps = {n_steps}')  # noqa
+
+        # check return_paths
+        # Nothing
+
+        # check conditioned_by
+        if len(conditioned_by) >= self.n_outputs_:
+            raise ValueError(f'len(conditioned_by) must be less than n_outputs but len(conditioned_by) = {len(conditioned_by)} for n_outputs = {self.n_outputs_}.')  # noqa
+        if not all([0 <= k < self.n_outputs_ for k in conditioned_by.keys()]):
+            raise KeyError(f'the key of conditioned_by must be between 0 and n_outputs-1. But conditioned_by.keys() = {conditioned_by.keys()}')  # noqa
+        if X is None and not all([not isinstance(v, np.ndarray) for v in conditioned_by.values()]):  # noqa
+            raise TypeError(f'the value of conditioned_by must be bool, int, or float when X is None but conditioned_by = {conditioned_by}')  # noqa
+        elif X is not None and not all([v.shape == (X.shape[0],) for v in conditioned_by.values() if isinstance(v, np.ndarray)]):    # noqa
+            raise ValueError(f'the shape of a np.ndarray value of conditioned_by must be (X.shape[0],). But conditioned_by = {conditioned_by}')  # noqa
+
+        # check init_sample
+        if init_sample is not None:
+            if init_sample.ndim != 1 or init_sample.size != self.n_outputs_:  # noqa
+                raise ValueError(f'init_sample must be (n_outputs,) shape array. But init_sample.shape = {init_sample.shape}')  # noqa
+
+        # check alpha
+        if alpha <= 0:
+            raise ValueError(f'alpha must be positive but alpha = {alpha}')
+
+        # sigma
+        if sigma is not None:
+            if isinstance(sigma, Iterable) and not all([s > 0 for s in sigma]):
+                raise ValueError(f'all values of sigma must be positive but sigma = {sigma}')  # noqa
+            if (not isinstance(sigma, Iterable)) and sigma <= 0:
+                raise ValueError(f'sigma must be positive but sigma = {sigma}')
+
+    def _initialize_samples(
+        self,
+        X: np.ndarray | None,
+        n_samples: int,
+        init_sample: np.ndarray | None,
+        conditioned_by: Mapping[int, bool | int | float | np.ndarray],
+    ) -> np.ndarray:
+        '''Initialize the sample paths, i.e. create the initial samples
+
+        Args:
+            X (np.ndarray | None): conditions.
+            n_samples (int): number of samples.
+            init_sample (np.ndarray | None): initial sample.
+            conditioned_by (Mapping[int, bool | int | float | np.ndarray]): conditions of x0.
+
+        Returns:
+            np.ndarray: initial samples
+                Shape: (n_samples, n_outputs - len(conditioned_by)) if X is None.
+                Shape: (n_samples * N, n_outputs - len(conditioned_by)) if X is not None, where N = X.shape[0].
+
+        NOTE:
+            the elements of x0 are independently generated from the normal distribution N(0, max(noise_strengths_)^2).  # noqa
+        '''  # noqa
+
+        N: int = 1 if X is None else X.shape[0]
+
+        if init_sample is not None:
+            x0 = np.vstack([init_sample.reshape(1, self.n_outputs_)]*N*n_samples)  # noqa
+        else:
+            x0 = np.random.randn(n_samples * N, self.n_outputs_)*max(self.noise_strengths_)  # noqa
+
+        return x0[:, [i for i in range(self.n_outputs_) if i not in conditioned_by.keys()]]  # noqa
+
+    @staticmethod
+    def _preprocess_conditioned_by(
+        X: np.ndarray | None,
+        n_samples: int,
+        conditioned_by: Mapping[int, bool | int | float | np.ndarray],
+    ) -> Mapping[int, np.ndarray]:
+        '''Preprocess the conditioned_by
+
+        Args:
+            X (np.ndarray | None): conditions.
+            n_samples (int): number of samples.
+            conditioned_by (Mapping[int, bool | int | float | np.ndarray]): conditions of x0.
+
+        Returns:
+            Mapping[int, np.ndarray]: preprocessed conditioned_by
+                The shape of the value is (n_samples, 1) if X is None.
+                The shape of the value is (n_samples * N, 1) if X is not None, where N = X.shape[0].
+        '''  # noqa
+        N = 1 if X is None else X.shape[0]
+        preprocessed_conditioned_by = {
+            k: (
+                np.repeat(v[:, np.newaxis], n_samples, axis=0)
+                if isinstance(v, np.ndarray) else
+                np.array([[v]]*N*n_samples)
+            )
+            for k, v in conditioned_by.items()
+        }
+        return preprocessed_conditioned_by
+
+    def _insert_conditiond_x_to_unconditioned_x(
+        self,
+        x: np.ndarray,
+        conditioned_by_processed: Mapping[int, np.ndarray],
+        map_dim_in_output_2_dim_in_x: Mapping[int, int] | None = None,
+    ):
+        '''Insert conditioned x to unconditioned x
+
+        Args:
+            x (np.ndarray): unconditioned x.
+                Shape: (*, n_outputs - len(conditioned_by_processed)).
+            conditioned_by_processed (Mapping[int, np.ndarray]): conditioned x.
+                The shape of the value is (*, 1).
+            map_dim_in_output_2_dim_in_x (Mapping[int, int] | None): mapping from the dimension of the output to the dimension of x. Defaults to None.
+
+        Returns:
+            np.ndarray: x with conditioned x.
+                Shape: (*, n_outputs).
+        '''  # noqa
+        if conditioned_by_processed:
+            if map_dim_in_output_2_dim_in_x is None:
+                map_dim_in_output_2_dim_in_x = {
+                    dio: i
+                    for i, dio in enumerate([
+                        dio_ for dio_ in range(self.n_outputs_)
+                        if dio_ not in conditioned_by_processed
+                    ])
+                }
+            x = np.hstack([
+                conditioned_by_processed[c]
+                if c in conditioned_by_processed else
+                x[:, [map_dim_in_output_2_dim_in_x[c]]]
+                for c in range(self.n_outputs_)
+            ])
+        return x
+
+    def _postprocess_sample_paths(
+        self,
+        paths: np.ndarray,
+        n_steps: int,
+        n_samples: int,
+        conditioned_by_processed: Mapping[int, np.ndarray],
+        map_dim_in_output_2_dim_in_x: Mapping[int, int] | None = None,
+    ) -> np.ndarray:
+        '''Postprocess the sample paths
+
+        Args:
+            paths (np.ndarray): sample paths.
+                Shape should be (n_steps, n_samples*N, (n_outputs - len(conditioned_by_processed))).
+                At leat, paths.size must be n_steps * n_samples * N * (n_outputs - len(conditioned_by_processed)).
+            n_steps (int): number of steps.
+            n_samples (int): number of samples.
+            conditioned_by_processed (Mapping[int, np.ndarray]): conditioned x.
+                The shape of the value is (n_samples * N, 1).
+            map_dim_in_output_2_dim_in_x (Mapping[int, int] | None): mapping from the dimension of the output to the dimension of x. Defaults to None.
+
+        Returns:
+            np.ndarray: postprocessed sample paths.
+                Shape: (n_steps, n_samples, N, n_outputs).
+        '''  # noqa
+        paths = paths.reshape(n_steps, -1, n_samples, self.n_outputs_ - len(conditioned_by_processed))  # noqa
+        # NOTE: The order of (..., -1, n_samples, ...) is based on np.repeat(X, n_samples, axis=0)  # noqa
+
+        if conditioned_by_processed:
+            if map_dim_in_output_2_dim_in_x is None:
+                map_dim_in_output_2_dim_in_x = {
+                    dio: i
+                    for i, dio in enumerate([
+                        dio_ for dio_ in range(self.n_outputs_)
+                        if dio_ not in conditioned_by_processed
+                    ])
+                }
+            # Attach conditioned x to the paths
+            paths = np.array([
+                np.hstack([
+                    conditioned_by_processed[c]
+                    if c in conditioned_by_processed else
+                    paths[step, :, :, map_dim_in_output_2_dim_in_x[c]].reshape(-1, 1)  # noqa
+                    for c in range(self.n_outputs_)
+                ])
+                for step in range(n_steps)
+            ]).reshape(n_steps, -1, n_samples, self.n_outputs_)
+
+        paths = paths.transpose(0, 2, 1, 3)
+        # NOTE: transponse it because the structure of the output is easier to use when the shape is (n_steps, n_samples, N, n_outputs)  # noqa
+
+        # validation
+        assert paths.shape == (n_steps, n_samples, paths.shape[2], self.n_outputs_), "Internal Error"  # noqa
+
+        return paths
