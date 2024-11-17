@@ -103,6 +103,11 @@ X_syn_em = sbmgenerator2.sample(X, n_samples=128, sampling_method=sbmgenerator2.
 
 ### Examples
 
+In this section, we will see some examples of using `ssbgm`.
+
+If you want to know more details, see [./samples](./samples) directory.
+Especially, [./samples/cheatsheet.ipynb](./samples/cheatsheet.ipynb) is a good starting point.
+
 #### Mixed Gaussian Distribution
 
 See [./samples/mixed_gaussian_distribution.ipynb](./samples/mixed_gaussian_distribution.ipynb) for more details.
