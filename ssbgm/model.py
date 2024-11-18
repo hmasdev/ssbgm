@@ -140,7 +140,7 @@ class ScoreBasedGenerator(BaseEstimator):
 
         # preprocess noise_strengths
         if noise_strengths is None:
-            noise_strengths = np.sqrt(np.logspace(-3, y.var(axis=0).max(), 11))  # noqa
+            noise_strengths = np.sqrt(np.logspace(-3, np.log10(y.var(axis=0).max()), 11))  # noqa
 
         self.noise_strengths_ = noise_strengths
         self.n_outputs_ = y.shape[1] if y.ndim > 1 else 1

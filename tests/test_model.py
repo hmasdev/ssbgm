@@ -112,6 +112,13 @@ def test_ScoreBasedGenerator_fit(
     # TODO: test with sigmas and keep_noised_data kwargs
     ssg = ScoreBasedGenerator(estimator=LinearRegression())
     ssg.fit(X, y)
+    # check noise_strengths
+    if y is None:
+        assert max(ssg.noise_strengths_) == X.std(axis=0).max()
+    elif y.ndim == 1:
+        assert max(ssg.noise_strengths_) == y.std()
+    else:
+        assert max(ssg.noise_strengths_) == y.std(axis=0).max()
 
 
 @pytest.mark.parametrize(
