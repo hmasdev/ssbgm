@@ -129,12 +129,12 @@ class ScoreBasedGenerator(BaseEstimator):
 
         if y is None:
             # if y is not given, model learns the score function of X
-            X, y = None, check_array(X, ensure_2d=False)  # type: ignore
+            X, y = None, check_array(X, ensure_2d=False, force_all_finite='allow-nan')  # type: ignore # noqa
             assert y is not None
             self.require_X_ = False
         else:
             # if y is given, model learns the score function of y given X
-            X, y = check_X_y(X, y, multi_output=True)
+            X, y = check_X_y(X, y, multi_output=True, force_all_finite='allow-nan')  # type: ignore # noqa
             assert y is not None
             self.require_X_ = True
 
@@ -718,10 +718,10 @@ class ScoreBasedGenerator(BaseEstimator):
 
         if y is None:
             # if y is not given, model learns the score function of X
-            X = check_array(X, ensure_2d=False)  # type: ignore
+            X = check_array(X, ensure_2d=False, force_all_finite='allow-nan')  # type: ignore # noqa
         else:
             # if y is given, model learns the score function of y given X
-            X, y = check_X_y(X, y, multi_output=True)
+            X, y = check_X_y(X, y, multi_output=True, force_all_finite='allow-nan')  # type: ignore # noqa
             assert y is not None
             if y.ndim == 1:
                 y = y.reshape(-1, 1)
