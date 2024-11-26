@@ -1,5 +1,4 @@
 from contextlib import contextmanager
-from logging import Logger, getLogger
 from typing import Generator
 import numpy as np
 
@@ -29,17 +28,18 @@ def np_seed(
             np.random.set_state(rng_state)
 
 
-def experimental_warn(
+def build_experimental_warn_message(
     prefix: str = '[experimental warning]',
-    logger: Logger = getLogger(__name__),
-) -> None:
-    """log warning message for experimental feature.
+) -> str:
+    """build warning message for experimental features.
 
     Args:
         prefix (str, optional): prefix of warning message. Defaults to ''.
-        logger (Logger, optional): logger object. Defaults to getLogger(__name__).
+
+    Returns:
+        str: warning message.
     """  # noqa
-    logger.warning(
+    return (
         f'{prefix}. '
         'You are using an experimental feature. '
         'This feature can cause unexpected behavior. '

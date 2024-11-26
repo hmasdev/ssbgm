@@ -3,7 +3,7 @@ from typing import Callable
 import numpy as np
 from tqdm import trange
 from .exceptions import MaximumIterationError
-from .utils import experimental_warn
+from .utils import build_experimental_warn_message
 
 
 def langevin_montecarlo(
@@ -85,10 +85,9 @@ def langevin_montecarlo(
     if pdf is None:
         suc = _suc
     elif use_pdf_as_domain_indicator:
-        experimental_warn(
+        logger.warning(build_experimental_warn_message(
             prefix='[experimental warning](proposal/rejection by domain indicator)',  # noqa
-            logger=logger,
-        )
+        ))
 
         def suc(x: np.ndarray) -> np.ndarray:  # type: ignore
             N = x.shape[0]
@@ -119,10 +118,9 @@ def langevin_montecarlo(
                     return z  # type: ignore
             raise MaximumIterationError()
     else:
-        experimental_warn(
+        logger.warning(build_experimental_warn_message(
             prefix='[experimental warning](Metropolis-Adjusted Langevin Algorithm)',  # noqa
-            logger=logger,
-        )
+        ))
 
         def suc(x: np.ndarray) -> np.ndarray:  # type: ignore
             N = x.shape[0]
