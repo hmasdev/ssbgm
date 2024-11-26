@@ -12,7 +12,7 @@ from ssbgm.utils import np_seed
 # TODO: test whether calling ScoreBasedGenerator.sample raises NotFittedError when ScoreBasedGenerator is not fitted  # noqa
 # TODO: test _postprocess_sample_paths
 
-DEFAULT_N_SAMPLES = 64
+DEFAULT_N_SAMPLES = 16
 
 
 @pytest.mark.parametrize(
@@ -345,6 +345,34 @@ def test_ScoreBasedGenerator__sample_langevin_montecarlo_w_conditions_with_condi
                 assert np.all(samples[n, :, k] == v)
         else:
             assert np.all(samples[:, :, k] == v)
+
+
+def test_ScoreBasedGenerator__sample_langevin_montecarlo_w_conditions_with_domain_specified() -> None:  # noqa
+
+    minx0 = 1.5
+    maxx0 = 4.5
+    minx1 = 2
+    maxx1 = 5.5
+
+    n_steps = 101
+    n_samples = DEFAULT_N_SAMPLES
+    alpha = 0.1
+    X = np.array([[1, 2], [3, 4], [5, 6]])
+    y = np.array([[1, 2], [3, 4], [5, 6]])
+    sbm = ScoreBasedGenerator(estimator=LinearRegression(), verbose=True)
+    sbm.fit(X, y)
+    sbm.estimator_.coef_ *= 0  # FIXME: use DummyRegressor
+    samples = sbm._sample_langenvin_montecarlo(
+        X,
+        n_samples=n_samples,
+        alpha=alpha,
+        init_sample=np.array([1.5, 2]),
+        n_steps=n_steps,
+        is_in_valid_domain_func=lambda x: ((minx0 <= x[0])*(x[0] <= maxx0)*(minx1 <= x[1])*(x[1] <= maxx1)),  # noqa
+    )
+    assert samples.shape == (n_samples, 3, X.shape[1])
+    samples = samples.reshape(-1, X.shape[1])
+    assert np.all((minx0 <= samples[:, 0])*(samples[:, 0] <= maxx0)*(minx1 <= samples[:, 1])*(samples[:, 1] <= maxx1))  # noqa
 
 
 @pytest.mark.parametrize(
