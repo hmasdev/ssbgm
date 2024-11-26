@@ -12,7 +12,7 @@ def langevin_montecarlo(
     delta_t: float = 0.1,
     n_steps: int = 1000,
     pdf: Callable[[np.ndarray], float] | None = None,
-    max_n_iter_until_accept: int = 100,
+    max_n_iter_until_accept: int = 1000,
     *,
     use_pdf_as_domain_indicator: bool = False,
     verbose: bool = False,
