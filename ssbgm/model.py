@@ -3,8 +3,8 @@ from functools import partial
 from typing import Callable, Iterable, Literal, Mapping, overload, TypeVar
 import numpy as np
 import sklearn
-from sklearn.base import (
-    BaseEstimator,
+from sklearn.base import BaseEstimator
+from sklearn.utils.validation import (
     check_array,
     check_is_fitted,
     check_X_y,
