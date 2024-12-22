@@ -86,9 +86,10 @@ class ScoreBasedGenerator(BaseEstimator):
     '''  # noqa
 
     class SamplingMethod(Enum):
-        LANGEVIN_MONTECARLO: str = 'langevin_montecarlo'
-        EULER: str = 'euler'
-        EULER_MARUYAMA: str = 'euler_maruyama'
+        # Ref. https://typing.readthedocs.io/en/latest/spec/enums.html#defining-members  # noqa
+        LANGEVIN_MONTECARLO = 'langevin_montecarlo'
+        EULER = 'euler'
+        EULER_MARUYAMA = 'euler_maruyama'
 
     def __init__(
         self,
